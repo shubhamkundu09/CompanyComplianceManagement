@@ -1,0 +1,257 @@
+/* Custom animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Table styles */
+.table-hover tbody tr:hover {
+    background-color: #f9fafb;
+    transition: all 0.3s;
+}
+
+/* Card hover effects */
+.card-hover {
+    transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.card-hover:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+}
+
+/* Loading spinner */
+.spinner {
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #4F46E5;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+
+/* Due date warning styles */
+.due-warning {
+    color: #f59e0b;
+}
+
+.due-danger {
+    color: #ef4444;
+    font-weight: 600;
+}
+
+/* Button warning style */
+.btn-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.btn-warning:hover {
+    background: #f59e0b;
+    color: #fff;
+    border-color: #f59e0b;
+}
+
+/* Period Badge Styles */
+.period-badge {
+    background: rgba(99, 102, 241, 0.12);
+    color: #818cf8;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.period-badge i {
+    font-size: 10px;
+}
+
+.period-completed {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+}
+
+.period-overdue {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.period-current {
+    background: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+
+/* Siren / Alert Indicator */
+.siren-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px 4px 8px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    position: relative;
+    z-index: 1;
+}
+
+.siren-light {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.siren-light::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    right: -4px;
+    bottom: -4px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    animation: none;
+}
+
+/* Warning (3 days before) - Blinking */
+.siren-warning .siren-light {
+    background: #f59e0b;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.6);
+    animation: siren-blink 0.8s ease-in-out infinite;
+}
+
+.siren-warning .siren-light::after {
+    animation: siren-pulse 0.8s ease-in-out infinite;
+}
+
+.siren-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* Overdue - Solid ON (always on) */
+.siren-overdue .siren-light {
+    background: #ef4444;
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.8);
+    animation: none;
+}
+
+.siren-overdue .siren-light::after {
+    border-color: rgba(239, 68, 68, 0.3);
+    animation: siren-pulse-overdue 1.5s ease-in-out infinite;
+}
+
+.siren-overdue {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* Danger (1 day before) - Faster blink */
+.siren-danger .siren-light {
+    background: #ef4444;
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.6);
+    animation: siren-blink-fast 0.4s ease-in-out infinite;
+}
+
+.siren-danger .siren-light::after {
+    animation: siren-pulse-fast 0.4s ease-in-out infinite;
+}
+
+.siren-danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* Animations */
+@keyframes siren-blink {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+@keyframes siren-blink-fast {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.2; transform: scale(0.7); }
+}
+
+@keyframes siren-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.5); opacity: 0.3; }
+}
+
+@keyframes siren-pulse-fast {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.8); opacity: 0.1; }
+}
+
+@keyframes siren-pulse-overdue {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.3); opacity: 0.1; }
+}
+
+/* Siren text */
+.siren-text {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Small siren for cards */
+.siren-small .siren-light {
+    width: 10px;
+    height: 10px;
+}
+
+.siren-small {
+    padding: 2px 8px 2px 6px;
+    font-size: 9px;
+}
+
+/* Position siren at top right of cards */
+.siren-absolute {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 10;
+}

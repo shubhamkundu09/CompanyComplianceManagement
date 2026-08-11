@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VNext Portal - Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); }
+        .glass-card { background: rgba(255,255,255,0.95); backdrop-filter: blur(2px); border-radius: 2rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .input-focus:focus { ring: 2px solid #3b82f6; border-color: transparent; }
+        .toast-notification { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    </style>
+    <script>
+        const API_BASE = '/api';
+        let authToken = localStorage.getItem('accessToken');
+        let currentUserRole = localStorage.getItem('userRole');
+
+        function getHeaders() {
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            };
+        }
+
+        async function apiRequest(url, options = {}) {
+            const res = await fetch(API_BASE + url, {
+                ...options,
+                headers: { ...getHeaders(), ...options.headers }
+            });
+            if (res.status === 401 || res.status === 403) {
+                localStorage.clear();
+                window.location.href = 'index.html';
+                throw new Error('Session expired. Please login again.');
+            }
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error || json.message || 'Request failed');
+            return json;
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast-notification fixed bottom-5 right-5 z-50 px-5 py-3 rounded-xl shadow-lg text-white font-medium transition-all ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`;
+            toast.innerText = msg;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3500);
+        }
+
+        // Auto-redirect if already logged in
+        if (window.location.pathname.includes('index.html') || window.location.pathname === '/' || window.location.pathname.endsWith('/')) {
+            if (localStorage.getItem('accessToken')) {
+                const role = localStorage.getItem('userRole');
+                if (role === 'SUPER_ADMIN') window.location.href = 'super-admin-dashboard.html';
+                else if (role === 'COMPANY_ADMIN') window.location.href = 'company-admin-dashboard.html';
+            }
+        }
+    </script>
+</head>
+<body class="h-screen flex items-center justify-center p-4">
+<div class="glass-card w-full max-w-md p-8">
+    <div class="text-center mb-6">
+        <i class="fas fa-building text-5xl text-blue-600 mb-2"></i>
+        <h1 class="text-3xl font-bold text-gray-800">VNext Portal</h1>
+        <p class="text-gray-500 mt-1">Sign in to your account</p>
+    </div>
+    <form id="loginForm">
+        <div class="mb-4">
+            <label class="block text-gray-700 font-medium mb-1">Email</label>
+            <input type="email" id="email" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none input-focus" placeholder="admin@company.com" required>
+        </div>
+        <div class="mb-6">
+            <label class="block text-gray-700 font-medium mb-1">Password</label>
+            <input type="password" id="password" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none input-focus" placeholder="••••••" required>
+        </div>
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold shadow-md transition transform hover:scale-[1.02]">Login <i class="fas fa-arrow-right ml-2"></i></button>
+    </form>
+    <p class="text-xs text-center text-gray-400 mt-6">Demo: superadmin@vnext.com / admin123 | companyadmin@techcorp.com / admin123</p>
+</div>
+
+<script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Logging in...';
+        try {
+            const res = await fetch(`${API_BASE}/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Login failed');
+            const { accessToken, refreshToken, user } = data.data;
+            localStorage.setItem('accessToken', accessToken);
+            localStorage.setItem('refreshToken', refreshToken);
+            localStorage.setItem('userRole', user.role);
+            localStorage.setItem('userId', user.id);
+            localStorage.setItem('companyId', user.companyId || '');
+            if (user.role === 'SUPER_ADMIN') window.location.href = 'super-admin-dashboard.html';
+            else if (user.role === 'COMPANY_ADMIN') window.location.href = 'company-admin-dashboard.html';
+            else { showToast('Unsupported user role', 'error'); logout(); }
+        } catch (err) {
+            showToast(err.message, 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = 'Login <i class="fas fa-arrow-right ml-2"></i>';
+        }
+    });
+</script>
+</body>
+</html>
