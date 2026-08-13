@@ -26,6 +26,7 @@ public class CompanyComplianceDTO {
     private String frequency;
     private String subTemplateName;
 
+    private Long subTemplateId;
 
 
     private String submissionReference;

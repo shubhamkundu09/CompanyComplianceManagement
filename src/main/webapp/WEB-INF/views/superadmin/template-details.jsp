@@ -1559,20 +1559,20 @@
                         </div>
                     </div>
                 </div>
-               <div class="hero-actions">
-                   <button onclick="openAddSubModal()" class="btn btn-primary" id="addSubBtn">
-                       <i class="fas fa-plus"></i> Add Sub-Compliance
-                   </button>
-                   <button onclick="configureParent()" class="btn btn-success" id="configureParentBtn">
-                       <i class="fas fa-cog"></i> Configure Parent
-                   </button>
-                   <button onclick="editParentConfig()" class="btn btn-primary" id="editParentConfigBtn" style="display:none;">
-                       <i class="fas fa-edit"></i> Edit Configuration
-                   </button>
-                   <button onclick="assignToCompanies()" class="btn btn-warning" id="assignBtn" style="display:none;">
-                       <i class="fas fa-users"></i> Assign to Companies
-                   </button>
-               </div>
+             <div class="hero-actions" id="heroActions">
+                 <button onclick="openAddSubModal()" class="btn btn-primary" id="addSubBtn" style="display:none;">
+                     <i class="fas fa-plus"></i> Add Sub-Compliance
+                 </button>
+                 <button onclick="configureParent()" class="btn btn-success" id="configureParentBtn" style="display:none;">
+                     <i class="fas fa-cog"></i> Configure Parent
+                 </button>
+                 <button onclick="editParentConfig()" class="btn btn-primary" id="editParentConfigBtn" style="display:none;">
+                     <i class="fas fa-edit"></i> Edit Configuration
+                 </button>
+                 <button onclick="assignToCompanies()" class="btn btn-warning" id="assignBtn" style="display:none;">
+                     <i class="fas fa-users"></i> Assign to Companies
+                 </button>
+             </div>
             </div>
 
             <!-- ==================== STATS ==================== -->
@@ -2336,15 +2336,20 @@
    }
 
     // ==================== UPDATE UI ====================
-
-
-    // ==================== UPDATE UI ====================
     function updateUI() {
         var hasSubs = subCompliances.length > 0;
         var hasConfig = parentConfig !== null;
         var hasAssignments = assignedCompanies.length > 0;
+        var isEditable = templateData && templateData.editableForCompanies === true;
 
-        // ===== FIX: Count unique companies =====
+        var addSubBtn = document.getElementById("addSubBtn");
+        var configureBtn = document.getElementById("configureParentBtn");
+        var editConfigBtn = document.getElementById("editParentConfigBtn");
+        var assignBtn = document.getElementById("assignBtn");
+        var configSection = document.getElementById("configSection");
+        var subSection = document.getElementById("subSection");
+
+        // ---- Count unique companies (for stats) ----
         var uniqueCompanyIds = new Set();
         for (var i = 0; i < assignedCompanies.length; i++) {
             if (assignedCompanies[i].companyId) {
@@ -2353,22 +2358,16 @@
         }
         var uniqueCompaniesCount = uniqueCompanyIds.size;
 
-        // Update sub count badge
+        // ---- Update badges and counts ----
         document.getElementById("subCountBadge").innerHTML =
             '<span class="badge badge-info"><i class="fas fa-sitemap"></i> ' +
-            subCompliances.length +
-            " sub(s)</span>";
-        document.getElementById("subCompliancesCount").textContent =
-            subCompliances.length;
+            subCompliances.length + " sub(s)</span>";
+        document.getElementById("subCompliancesCount").textContent = subCompliances.length;
 
-        // Update config status badge
+        // ---- Config status badge ----
         if (hasSubs) {
-            var anyConfigured = subCompliances.some(function (s) {
-                return s.isConfigured === true;
-            });
-            var allConfigured = subCompliances.every(function (s) {
-                return s.isConfigured === true;
-            });
+            var anyConfigured = subCompliances.some(function (s) { return s.isConfigured === true; });
+            var allConfigured = subCompliances.every(function (s) { return s.isConfigured === true; });
 
             if (allConfigured && subCompliances.length > 0) {
                 document.getElementById("configStatusBadge").innerHTML =
@@ -2388,67 +2387,10 @@
                 '<span class="badge badge-pending"><i class="fas fa-clock"></i> Not Configured</span>';
         }
 
-        // Show/hide Add Sub-Compliance button
-        var addSubBtn = document.getElementById("addSubBtn");
-        if (hasConfig && !hasSubs) {
-            addSubBtn.style.display = "none";
-            document.getElementById("configureParentBtn").style.display = "none";
-            document.getElementById("editParentConfigBtn").style.display = "inline-flex";
-            document.getElementById("configSection").style.display = "block";
-            document.getElementById("subSection").style.display = "none";
-            document.getElementById("assignBtn").style.display = hasAssignments ? "none" : "inline-flex";
-            if (document.getElementById("assignBtn").style.display !== "none") {
-                document.getElementById("assignBtn").innerHTML = '<i class="fas fa-users"></i> Assign to Companies';
-            }
-            return;
-        }
-
-        addSubBtn.style.display = "inline-flex";
-
-        if (hasSubs) {
-            document.getElementById("configureParentBtn").style.display = "none";
-            document.getElementById("editParentConfigBtn").style.display = "none";
-            document.getElementById("subSection").style.display = "block";
-            document.getElementById("configSection").style.display = "none";
-        } else if (hasConfig) {
-            document.getElementById("configureParentBtn").style.display = "none";
-            document.getElementById("editParentConfigBtn").style.display = "inline-flex";
-            document.getElementById("subSection").style.display = "none";
-            document.getElementById("configSection").style.display = "block";
-        } else {
-            document.getElementById("configureParentBtn").style.display = "inline-flex";
-            document.getElementById("editParentConfigBtn").style.display = "none";
-            document.getElementById("subSection").style.display = "none";
-            document.getElementById("configSection").style.display = "none";
-        }
-
-        var assignBtn = document.getElementById("assignBtn");
-        if (assignBtn) {
-            if (hasAssignments) {
-                assignBtn.style.display = "none";
-            } else if (hasSubs) {
-                var anyConfigured = subCompliances.some(function (s) {
-                    return s.isConfigured === true;
-                });
-                if (anyConfigured) {
-                    assignBtn.style.display = "inline-flex";
-                    assignBtn.innerHTML = '<i class="fas fa-users"></i> Assign to Companies';
-                } else {
-                    assignBtn.style.display = "none";
-                }
-            } else if (hasConfig) {
-                assignBtn.style.display = "inline-flex";
-                assignBtn.innerHTML = '<i class="fas fa-users"></i> Assign to Companies';
-            } else {
-                assignBtn.style.display = "none";
-            }
-        }
-
-        // ===== FIX: Use unique companies count =====
+        // ---- Stats ----
         document.getElementById("assignedCompaniesCount").textContent = uniqueCompaniesCount;
         document.getElementById("companyCount").textContent = uniqueCompaniesCount;
 
-        // Calculate configured vs pending companies (unique companies)
         var configured = 0, pending = 0;
         if (uniqueCompaniesCount > 0) {
             var companyIds = Array.from(uniqueCompanyIds);
@@ -2465,7 +2407,73 @@
         }
         document.getElementById("configuredCount").textContent = configured;
         document.getElementById("pendingCount").textContent = pending;
+
+        // ---- Now handle visibility based on editable flag ----
+        if (isEditable) {
+            // ---- Editable compliance ----
+            // SuperAdmin cannot add sub‑compliances, configure, or edit config
+            addSubBtn.style.display = "none";
+            configureBtn.style.display = "none";
+            editConfigBtn.style.display = "none";
+
+            // Assign button: show only if not yet assigned to any company
+            assignBtn.style.display = (uniqueCompaniesCount > 0) ? "none" : "inline-flex";
+            if (assignBtn.style.display !== "none") {
+                assignBtn.innerHTML = '<i class="fas fa-users"></i> Assign to Companies';
+            }
+
+            // Hide parent config section entirely
+            configSection.style.display = "none";
+
+            // Show sub‑section only if there are sub‑compliances (created by companies)
+            subSection.style.display = hasSubs ? "block" : "none";
+
+            // We exit early because all other logic is for non‑editable
+            return;
+        }
+
+        // ---- Non‑editable compliance (original logic) ----
+        if (hasSubs) {
+            configureBtn.style.display = "none";
+            editConfigBtn.style.display = "none";
+            subSection.style.display = "block";
+            configSection.style.display = "none";
+            addSubBtn.style.display = "inline-flex";
+        } else if (hasConfig) {
+            configureBtn.style.display = "none";
+            editConfigBtn.style.display = "inline-flex";
+            subSection.style.display = "none";
+            configSection.style.display = "block";
+            addSubBtn.style.display = "inline-flex";
+        } else {
+            configureBtn.style.display = "inline-flex";
+            editConfigBtn.style.display = "none";
+            subSection.style.display = "none";
+            configSection.style.display = "none";
+            addSubBtn.style.display = "inline-flex";
+        }
+
+        // Assign button for non‑editable
+        if (hasAssignments) {
+            assignBtn.style.display = "none";
+        } else if (hasSubs) {
+            var anyConfiguredSub = subCompliances.some(function (s) { return s.isConfigured === true; });
+            if (anyConfiguredSub) {
+                assignBtn.style.display = "inline-flex";
+                assignBtn.innerHTML = '<i class="fas fa-users"></i> Assign to Companies';
+            } else {
+                assignBtn.style.display = "none";
+            }
+        } else if (hasConfig) {
+            assignBtn.style.display = "inline-flex";
+            assignBtn.innerHTML = '<i class="fas fa-users"></i> Assign to Companies';
+        } else {
+            assignBtn.style.display = "none";
+        }
     }
+
+
+
 
 
     // ==================== RENDER PARENT CONFIG ====================
@@ -2649,164 +2657,178 @@
 
 
     // ==================== RENDER ASSIGNED COMPANIES ====================
+    function renderAssignedCompanies() {
+        var container = document.getElementById("companiesGrid");
 
-   function renderAssignedCompanies() {
-       var container = document.getElementById("companiesGrid");
+        var companyMap = {};
+        for (var i = 0; i < assignedCompanies.length; i++) {
+            var c = assignedCompanies[i];
+            var key = c.companyId;
+            if (!companyMap[key]) {
+                companyMap[key] = {
+                    companyId: c.companyId,
+                    companyName: c.companyName || "Unknown Company",
+                    companyEmail: c.companyEmail || "",
+                    parentAssignment: null,
+                    subAssignments: []
+                };
+            }
+            // ---- FIX: use subTemplateId ----
+            if (c.subTemplateId == null) {
+                companyMap[key].parentAssignment = c;
+            } else {
+                companyMap[key].subAssignments.push(c);
+            }
+        }
 
-       // Group assignments by company
-       var companyMap = {};
-       for (var i = 0; i < assignedCompanies.length; i++) {
-           var c = assignedCompanies[i];
-           var key = c.companyId;
-           if (!companyMap[key]) {
-               companyMap[key] = {
-                   companyId: c.companyId,
-                   companyName: c.companyName || "Unknown Company",
-                   companyEmail: c.companyEmail || "",
-                   assignments: [],
-                   companyComplianceIds: []
-               };
-           }
-           companyMap[key].assignments.push(c);
-           companyMap[key].companyComplianceIds.push(c.id);
-       }
+        var uniqueList = Object.values(companyMap);
 
-       var uniqueList = Object.values(companyMap);
+        // Update counts
+        document.getElementById("assignedCompaniesCount").textContent = uniqueList.length;
+        document.getElementById("companyCount").textContent = uniqueList.length;
 
-       document.getElementById("assignedCompaniesCount").textContent = uniqueList.length;
-       document.getElementById("companyCount").textContent = uniqueList.length;
+        var configured = 0, pending = 0;
+        for (var i = 0; i < uniqueList.length; i++) {
+            var hasConfiguredSub = uniqueList[i].subAssignments.some(function(a) { return a.configured === true; });
+            if (hasConfiguredSub) configured++;
+            else pending++;
+        }
+        document.getElementById("configuredCount").textContent = configured;
+        document.getElementById("pendingCount").textContent = pending;
 
-       // Calculate stats
-       var configured = 0, pending = 0;
-       for (var i = 0; i < uniqueList.length; i++) {
-           var hasConfigured = uniqueList[i].assignments.some(function (a) {
-               return a.configured === true;
-           });
-           if (hasConfigured) configured++;
-           else pending++;
-       }
-       document.getElementById("configuredCount").textContent = configured;
-       document.getElementById("pendingCount").textContent = pending;
+        if (!uniqueList.length) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-building"></i> No companies assigned yet.</div>';
+            return;
+        }
 
-       if (!uniqueList.length) {
-           container.innerHTML =
-               '<div class="empty-state"><i class="fas fa-building"></i> No companies assigned yet. Configure the compliance to auto-assign to all active companies.</div>';
-           return;
-       }
+        var html = "";
+        var today = new Date();
+        today.setHours(0, 0, 0, 0);
 
-       var html = "";
-       var today = new Date();
-       today.setHours(0, 0, 0, 0);
+        for (var i = 0; i < uniqueList.length; i++) {
+            var comp = uniqueList[i];
+            var companyName = comp.companyName;
+            var companyEmail = comp.companyEmail;
+            var avatarColor = getAvatarColor(companyName);
+            var initials = companyName.charAt(0).toUpperCase();
 
-       for (var i = 0; i < uniqueList.length; i++) {
-           var comp = uniqueList[i];
-           var companyName = comp.companyName;
-           var companyEmail = comp.companyEmail;
-           var avatarColor = getAvatarColor(companyName);
-           var initials = companyName.charAt(0).toUpperCase();
+            // Determine overall status (fallback to parent status)
+            var overallStatus = "PENDING";
+            var parent = comp.parentAssignment;
+            if (parent) {
+                overallStatus = parent.status || "PENDING";
+                if (parent.dueDate && overallStatus !== "COMPLETED") {
+                    var due = new Date(parent.dueDate);
+                    due.setHours(0,0,0,0);
+                    if (due < today) overallStatus = "OVERDUE";
+                }
+            }
 
-           // Calculate overall status for the company
-           var allCompleted = comp.assignments.every(function (a) { return a.status === "COMPLETED"; });
-           var anyOverdue = comp.assignments.some(function (a) { return a.status === "OVERDUE" && a.status !== "COMPLETED"; });
-           var anyInProgress = comp.assignments.some(function (a) { return a.status === "IN_PROGRESS"; });
-           var overallStatus = allCompleted ? "COMPLETED" : anyOverdue ? "OVERDUE" : anyInProgress ? "IN_PROGRESS" : "PENDING";
-           var statusClass = getCompanyStatusClass(overallStatus);
-           var statusLabel = getStatusLabel(overallStatus);
+            var subs = comp.subAssignments;
+            if (subs.length > 0) {
+                var allCompleted = subs.every(function(s) { return s.status === "COMPLETED"; });
+                var anyOverdue = subs.some(function(s) { return s.status === "OVERDUE" && s.status !== "COMPLETED"; });
+                var anyInProgress = subs.some(function(s) { return s.status === "IN_PROGRESS"; });
+                if (allCompleted) overallStatus = "COMPLETED";
+                else if (anyOverdue) overallStatus = "OVERDUE";
+                else if (anyInProgress) overallStatus = "IN_PROGRESS";
+                else overallStatus = "PENDING";
+            }
 
-           html +=
-               '<div class="company-card" style="border-left:3px solid ' +
-               (overallStatus === "COMPLETED" ? "var(--success)" :
-                   overallStatus === "OVERDUE" ? "var(--danger)" : "var(--primary)") +
-               ';">' +
-               '<div class="company-header">' +
-               '<div class="company-info">' +
-               '<div class="avatar ' + avatarColor + '">' + initials + "</div>" +
-               '<div style="min-width:0;">' +
-               '<div class="name">' + escapeHtml(companyName) + "</div>" +
-               '<div class="email">' + escapeHtml(companyEmail) + "</div>" +
-               "</div>" +
-               "</div>" +
-               '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">' +
-               '<span class="status-badge ' + statusClass + '">' + statusLabel + "</span>" +
-               '<button onclick="removeCompany(' + comp.companyId + ", '" + escapeHtml(companyName) + '\')" class="btn btn-danger btn-sm" style="padding:4px 10px;font-size:11px;" title="Remove company from this compliance">' +
-               '<i class="fas fa-trash-alt"></i> Remove</button>' +
-               "</div>" +
-               "</div>" +
-               '<div class="sub-list">' +
-               '<div class="sub-label"><i class="fas fa-sitemap" style="color:var(--primary);"></i> Sub-Compliances (' + comp.assignments.length + ")</div>";
+            var statusClass = getCompanyStatusClass(overallStatus);
+            var statusLabel = getStatusLabel(overallStatus);
 
-           // Sort assignments by due date
-           comp.assignments.sort(function (a, b) {
-               return new Date(a.dueDate) - new Date(b.dueDate);
-           });
+            html +=
+                '<div class="company-card" style="border-left:3px solid ' +
+                (overallStatus === "COMPLETED" ? "var(--success)" :
+                    overallStatus === "OVERDUE" ? "var(--danger)" : "var(--primary)") +
+                ';">' +
+                '<div class="company-header">' +
+                '<div class="company-info">' +
+                '<div class="avatar ' + avatarColor + '">' + initials + "</div>" +
+                '<div style="min-width:0;">' +
+                '<div class="name">' + escapeHtml(companyName) + "</div>" +
+                '<div class="email">' + escapeHtml(companyEmail) + "</div>" +
+                "</div>" +
+                "</div>" +
+                '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">' +
+                '<span class="status-badge ' + statusClass + '">' + statusLabel + "</span>" +
+                (parent ?
+                    '<button onclick="removeCompany(' + comp.companyId + ", '" + escapeHtml(companyName) + '\')" class="btn btn-danger btn-sm" style="padding:4px 10px;font-size:11px;" title="Remove company from this compliance">' +
+                    '<i class="fas fa-trash-alt"></i> Remove</button>' :
+                    '') +
+                "</div>" +
+                "</div>" +
+                '<div class="sub-list">' +
+                '<div class="sub-label"><i class="fas fa-sitemap" style="color:var(--primary);"></i> Sub-Compliances (' + subs.length + ")</div>";
 
-           for (var j = 0; j < comp.assignments.length; j++) {
-               var c = comp.assignments[j];
-               var subStatus = c.status || "PENDING";
-               var subStatusClass = getCompanyStatusClass(subStatus);
-               var subStatusLabel = getStatusLabel(subStatus);
-               var isConfigured = c.configured || false;
+            if (subs.length === 0) {
+                html += '<div style="padding:8px 0;font-size:12px;color:var(--gray-500);">No sub‑compliances added yet.</div>';
+            } else {
+                subs.sort(function (a, b) { return new Date(a.dueDate) - new Date(b.dueDate); });
+                for (var j = 0; j < subs.length; j++) {
+                    var c = subs[j];
+                    var subStatus = c.status || "PENDING";
+                    var subStatusClass = getCompanyStatusClass(subStatus);
+                    var subStatusLabel = getStatusLabel(subStatus);
+                    var isConfigured = c.configured || false;
+                    var subName = c.subTemplateName || c.templateName || "Sub-Compliance #" + (j + 1);
 
-               var subName = c.subTemplateName || c.templateName || "Sub-Compliance #" + (j + 1);
+                    var dueDateDisplay = "No due date";
+                    var dueDateClass = "";
+                    if (c.dueDate && c.frequency) {
+                        var dueDateObj = new Date(c.dueDate);
+                        dueDateDisplay = formatDate(c.dueDate);
+                        if (subStatus !== "COMPLETED" && subStatus !== "EXEMPTED") {
+                            var diffDays = Math.ceil((dueDateObj - today) / (1000 * 60 * 60 * 24));
+                            if (diffDays < 0) {
+                                dueDateClass = "overdue";
+                                dueDateDisplay += " (Overdue)";
+                            } else if (diffDays <= 7) {
+                                dueDateClass = "pending";
+                                dueDateDisplay += " (" + diffDays + " days)";
+                            }
+                        }
+                    } else if (c.dueDate && !c.frequency) {
+                        dueDateDisplay = formatDate(c.dueDate);
+                    }
 
-               // Due date display
-               var dueDateDisplay = "No due date";
-               var dueDateClass = "";
-               if (c.dueDate && c.frequency) {
-                   var dueDateObj = new Date(c.dueDate);
-                   dueDateDisplay = formatDate(c.dueDate);
-                   if (subStatus !== "COMPLETED" && subStatus !== "EXEMPTED") {
-                       var diffDays = Math.ceil((dueDateObj - today) / (1000 * 60 * 60 * 24));
-                       if (diffDays < 0) {
-                           dueDateClass = "overdue";
-                           dueDateDisplay += " (Overdue)";
-                       } else if (diffDays <= 7) {
-                           dueDateClass = "pending";
-                           dueDateDisplay += " (" + diffDays + " days)";
-                       }
-                   }
-               } else if (c.dueDate && !c.frequency) {
-                   // fallback: if dueDate exists but frequency is null, still show the date
-                   dueDateDisplay = formatDate(c.dueDate);
-               }
-               // else remains "No due date"
+                    var frequencyDisplay = c.frequency ? getFrequencyLabel(c.frequency) : "—";
 
-               // Frequency label
-               var frequencyDisplay = "—";
-               if (c.frequency) {
-                   frequencyDisplay = getFrequencyLabel(c.frequency);
-               }
+                    html +=
+                        '<div class="sub-item" style="border-left-color:' +
+                        (subStatus === "COMPLETED" ? "var(--success)" :
+                            subStatus === "OVERDUE" ? "var(--danger)" : "var(--primary)") +
+                        ';">' +
+                        '<div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;">' +
+                        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                        '<span class="sub-name">' + escapeHtml(subName) + "</span>" +
+                        '<span class="badge ' + (isConfigured ? "badge-active" : "badge-pending") +
+                        '" style="font-size:9px;padding:1px 8px;">' +
+                        (isConfigured ? "Configured" : "Pending") +
+                        "</span>" +
+                        "</div>" +
+                        '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--gray-500);">' +
+                        (frequencyDisplay !== "—" ? '<span><i class="fas fa-redo" style="color:var(--primary);"></i> ' + frequencyDisplay + "</span>" : "") +
+                        '<span class="' + dueDateClass + '"><i class="fas fa-calendar-alt" style="color:var(--primary);"></i> Due: ' + dueDateDisplay + "</span>" +
+                        "</div>" +
+                        "</div>" +
+                        '<span class="sub-status ' + subStatusClass +
+                        '" style="font-size:9px;padding:2px 10px;flex-shrink:0;">' +
+                        subStatusLabel +
+                        "</span>" +
+                        "</div>";
+                }
+            }
 
-               html +=
-                   '<div class="sub-item" style="border-left-color:' +
-                   (subStatus === "COMPLETED" ? "var(--success)" :
-                       subStatus === "OVERDUE" ? "var(--danger)" : "var(--primary)") +
-                   ';">' +
-                   '<div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;">' +
-                   '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-                   '<span class="sub-name">' + escapeHtml(subName) + "</span>" +
-                   '<span class="badge ' + (isConfigured ? "badge-active" : "badge-pending") +
-                   '" style="font-size:9px;padding:1px 8px;">' +
-                   (isConfigured ? "Configured" : "Pending") +
-                   "</span>" +
-                   "</div>" +
-                   '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--gray-500);">' +
-                   (frequencyDisplay !== "—" ? '<span><i class="fas fa-redo" style="color:var(--primary);"></i> ' + frequencyDisplay + "</span>" : "") +
-                   '<span class="' + dueDateClass + '"><i class="fas fa-calendar-alt" style="color:var(--primary);"></i> Due: ' + dueDateDisplay + "</span>" +
-                   "</div>" +
-                   "</div>" +
-                   '<span class="sub-status ' + subStatusClass +
-                   '" style="font-size:9px;padding:2px 10px;flex-shrink:0;">' +
-                   subStatusLabel +
-                   "</span>" +
-                   "</div>";
-           }
+            html += "</div></div>";
+        }
 
-           html += "</div></div>";
-       }
+        container.innerHTML = html;
+    }
 
-       container.innerHTML = html;
-   }
+
+
 
     // ==================== REMOVE COMPANY ====================
    async function removeCompany(companyId, companyName) {

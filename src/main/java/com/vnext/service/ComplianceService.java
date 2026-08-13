@@ -44,6 +44,8 @@ public class ComplianceService {
 
     // ==================== SUPER ADMIN COMPLIANCE MANAGEMENT ====================
 
+    // In ComplianceService.java
+
     @Transactional
     public ComplianceTemplateDTO createTemplate(ComplianceTemplateDTO dto, Long adminId) {
         log.info("SuperAdmin creating compliance template: {}", dto.getName());
@@ -58,12 +60,17 @@ public class ComplianceService {
         template.setIsActive(true);
         template.setIsCompanySpecific(false);
         template.setPriority(dto.getPriority() != null ? dto.getPriority() : 0);
-        // NEW: set editableForCompanies
         template.setEditableForCompanies(dto.getEditableForCompanies() != null && dto.getEditableForCompanies());
         template.setCreatedBy(adminId);
 
         ComplianceTemplate saved = templateRepository.save(template);
         log.info("Compliance template created with ID: {}", saved.getId());
+
+        // --- NEW: Auto‑assign if editable ---
+        if (Boolean.TRUE.equals(saved.getEditableForCompanies())) {
+            log.info("Editable template created – auto‑assigning to all active companies");
+            assignComplianceToAllActiveCompanies(saved.getId(), adminId);
+        }
 
         notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Created",
@@ -73,6 +80,7 @@ public class ComplianceService {
         );
         return convertToTemplateDTO(saved);
     }
+
 
     @Transactional
     public ComplianceTemplateDTO updateTemplate(Long id, ComplianceTemplateDTO dto, Long adminId) {
@@ -303,6 +311,15 @@ public class ComplianceService {
 
     // ==================== ASSIGNMENT METHODS ====================
 
+    /**
+     * Assigns a compliance template to a single company.
+     * For non‑editable templates, it also creates sub‑compliances (if any) and copies
+     * their configurations. For editable templates, only the parent is created.
+     *
+     * @param templateId ID of the compliance template
+     * @param companyId  ID of the company
+     * @param adminId    ID of the admin performing the assignment (SuperAdmin)
+     */
     @Transactional
     public void assignComplianceToCompany(Long templateId, Long companyId, Long adminId) {
         log.info("=== Assigning compliance template {} to company {} ===", templateId, companyId);
@@ -316,6 +333,7 @@ public class ComplianceService {
         Company company = companyRepository.findById(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Company not found with ID: " + companyId));
 
+        // Check if there is already a live parent assignment for this company+template
         List<CompanyCompliance> allExistingForPair = companyComplianceRepository
                 .findAllByCompanyIdAndTemplateId(companyId, templateId);
 
@@ -327,6 +345,7 @@ public class ComplianceService {
             throw new BusinessException("Compliance is already assigned to this company");
         }
 
+        // Purge any leftover soft-deleted or orphaned records for a clean reassignment
         if (!allExistingForPair.isEmpty()) {
             log.info("Purging {} leftover compliance record(s) for company {} / template {} before reassigning",
                     allExistingForPair.size(), companyId, templateId);
@@ -338,10 +357,12 @@ public class ComplianceService {
         // Determine if parent is editable
         boolean editable = Boolean.TRUE.equals(template.getEditableForCompanies());
 
-        // For non‑editable: fetch global sub‑templates (company IS NULL)
+        // ---- FIX: For editable templates, we never fetch or create sub‑compliances ----
         List<ComplianceSubTemplate> subTemplates = new ArrayList<>();
         Map<Long, ComplianceConfig> subTemplateConfigMap = new HashMap<>();
+
         if (!editable) {
+            // Only fetch sub‑templates if NOT editable (global sub‑templates from SuperAdmin)
             subTemplates = subTemplateRepository
                     .findByParentTemplateIdAndCompanyIsNullAndIsActiveTrueOrderByDisplayOrderAsc(templateId);
             for (ComplianceSubTemplate sub : subTemplates) {
@@ -353,12 +374,13 @@ public class ComplianceService {
             }
         }
 
+        // Get parent‑level config (only if non‑editable and no sub‑templates)
         ComplianceConfig parentTemplateConfig = null;
         if (!editable && subTemplates.isEmpty()) {
             parentTemplateConfig = template.getDirectConfig();
         }
 
-        // 1. Create parent CompanyCompliance
+        // 1. Create parent CompanyCompliance (always, for both editable and non‑editable)
         CompanyCompliance parentCC = new CompanyCompliance();
         parentCC.setCompany(company);
         parentCC.setTemplate(template);
@@ -372,7 +394,7 @@ public class ComplianceService {
         parentCC = companyComplianceRepository.save(parentCC);
         log.info("Created parent CompanyCompliance ID: {}", parentCC.getId());
 
-        // 2. If non‑editable and has sub‑templates, create sub‑compliances
+        // 2. Create sub‑compliances ONLY if non‑editable and sub‑templates exist
         if (!editable && !subTemplates.isEmpty()) {
             for (ComplianceSubTemplate subTemplate : subTemplates) {
                 CompanyCompliance subCC = new CompanyCompliance();
@@ -389,19 +411,21 @@ public class ComplianceService {
                 subCC = companyComplianceRepository.save(subCC);
                 log.info("Created sub CompanyCompliance ID: {} for sub-template: {}", subCC.getId(), subTemplate.getId());
 
+                // Copy configuration from template‑level to company‑specific config
                 ComplianceConfig sourceConfig = subTemplateConfigMap.get(subTemplate.getId());
                 if (sourceConfig != null) {
                     copyConfigToCompany(sourceConfig, subCC, adminId);
                 }
             }
         } else if (!editable && parentTemplateConfig != null) {
-            // No sub‑templates, parent has config
+            // No sub‑templates, parent has config (non‑editable, single‑level)
             copyConfigToCompany(parentTemplateConfig, parentCC, adminId);
         } else {
-            // Editable: only parent created, no sub‑compliances. Company admin will add them later.
+            // Editable: only parent created, no sub‑compliances.
             log.info("Editable compliance assigned; company admin will manage sub‑compliances.");
         }
 
+        // Add history for the parent assignment
         addHistoryForCompanyCompliance(parentCC, null, parentCC.getStatus(),
                 "Compliance Assigned",
                 "Compliance auto-assigned on company creation: " + template.getName() +
@@ -410,6 +434,7 @@ public class ComplianceService {
 
         log.info("=== Compliance assigned successfully to company: {} ===", companyId);
 
+        // Notifications
         notificationEventService.notifySuperAdminsPushOnly(
                 "Company Assigned to Compliance",
                 "Company " + company.getName() + " has been assigned to \"" + template.getName() + "\".",
@@ -427,6 +452,8 @@ public class ComplianceService {
             );
         }
     }
+
+
 
     @Transactional
     public void assignComplianceToCompanies(ComplianceAssignDTO assignDTO, Long adminId) {
@@ -2530,6 +2557,7 @@ public class ComplianceService {
         }
 
         if (cc.getSubTemplate() != null) {
+            dto.setSubTemplateId(cc.getSubTemplate().getId());
             dto.setSubTemplateName(cc.getSubTemplate().getName());
         }
 
