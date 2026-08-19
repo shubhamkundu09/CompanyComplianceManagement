@@ -1556,9 +1556,6 @@
             <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item active">
                 <i class="fas fa-tasks"></i> My Compliances
             </a>
-            <a href="${baseUrl}/company-admin/compliance/custom/create" class="nav-item">
-                <i class="fas fa-plus-circle"></i> Custom Compliance
-            </a>
 
             <div class="sidebar-label">Communication</div>
             <a href="${baseUrl}/company-admin/notifications" class="nav-item ">
@@ -2342,7 +2339,7 @@
                        instructions: s.instructions,
                        reminderDaysBefore: s.reminderDaysBefore || 10,
                        completedAt: s.completedAt || s.updatedAt,         // from DTO
-                       completedByName: s.completedByName || "Company Admin",
+                       completedByName: s.completedByName,
                        submissionReference: s.submissionReference,        // from DTO
                        submissionDocumentUrl: s.submissionDocumentUrl     // from DTO
                    };
@@ -2390,12 +2387,15 @@
                        }
                    }
                }
+               var isCanManage = targetEntry.canManage === true || targetEntry.editableForCompanies === true || (foundParentEntry && (foundParentEntry.canManage === true || foundParentEntry.editableForCompanies === true));
 
                parentData = {
                    templateName: targetEntry.templateName || "Compliance",
                    templateDescription: targetEntry.description || "",
                    isSuperAdminConfig: targetEntry.isSuperAdminConfig !== false,
                    isCustom: targetEntry.isSuperAdminConfig === false,
+                   canManage: isCanManage,
+                   editableForCompanies: isCanManage,
                    subCompliances: subCompliances,
                    totalSubCompliances: subCompliances.length,
                    configuredSubCompliances: subCompliances.filter(function (s) { return s.configured === true; }).length,
@@ -2415,7 +2415,7 @@
                renderHeader();
                renderSubCompliances();
 
-               if (parentData.hasSubCompliances) {
+               if (parentData.hasSubCompliances || parentData.canManage) {
                    document.getElementById('parentConfigSection').style.display = 'none';
                    document.getElementById('subSection').style.display = 'block';
                    document.getElementById('subCountTab').textContent = subCompliances.length;
@@ -2483,9 +2483,10 @@
             '<i class="fas ' + iconClass + '"></i>';
 
         var statusInfo = getStatusInfo(p.overallStatus);
-        var typeLabel = p.isCustom ? "Custom" : "Admin Configured";
-        var typeIcon = p.isCustom ? "fa-user-tie" : "fa-user-shield";
-        var typeCls = p.isCustom ? "badge-custom" : "badge-primary";
+        var canManage = p.canManage === true;
+        var typeLabel = canManage ? "Editable Category" : "Non-Editable (Admin Managed)";
+        var typeIcon = canManage ? "fa-edit" : "fa-lock";
+        var typeCls = canManage ? "badge-warning" : "badge-primary";
 
         document.getElementById("heroBadges").innerHTML =
             '<span class="badge ' +
@@ -2504,10 +2505,7 @@
             "</span>" +
             '<span class="badge badge-info"><i class="fas fa-list"></i> ' +
             (p.totalSubCompliances || 0) +
-            " Sub-Compliances</span>" +
-            (p.isConfigured
-                ? '<span class="badge badge-success"><i class="fas fa-check-circle"></i> Configured</span>'
-                : '<span class="badge badge-warning"><i class="fas fa-clock"></i> Pending Setup</span>');
+            " Sub-Compliances</span>";
 
         var actionsHtml = "";
 
@@ -2515,27 +2513,15 @@
         actionsHtml +=
             "<button onclick=\"location.reload()\" class=\"vnext-btn vnext-btn-gold\"><i class=\"fas fa-sync-alt\"></i> Refresh</button>";
 
-        // ===== Other action buttons =====
-        if (p.isCustom) {
-            if (!p.hasSubCompliances) {
-                if (p.isConfigured) {
-                    actionsHtml +=
-                        '<button onclick="openConfigModalForParent()" class="btn btn-primary"><i class="fas fa-edit"></i> Edit Configuration</button>';
-                } else {
-                    actionsHtml +=
-                        '<button onclick="openAddSubModal()" class="btn btn-primary"><i class="fas fa-plus"></i> Add Sub-Compliance</button>';
-                    actionsHtml +=
-                        '<button onclick="openConfigModalForParent()" class="btn btn-success"><i class="fas fa-cog"></i> Configure Parent</button>';
-                }
-            } else {
-                actionsHtml +=
-                    '<button onclick="openAddSubModal()" class="btn btn-primary"><i class="fas fa-plus"></i> Add Sub-Compliance</button>';
-            }
-        } else {
-            if (!p.isConfigured && !p.hasSubCompliances) {
-                actionsHtml +=
-                    '<button onclick="openConfigModalForParent()" class="btn btn-success"><i class="fas fa-cog"></i> Configure</button>';
-            }
+        // ===== ASSIGN TO EMPLOYEES BUTTON (always available for both editable and non-editable) =====
+        var assignUrl = contextPath + "/company-admin/compliance/parent/" + (p.id || PARENT_ID) + "/assign";
+        actionsHtml +=
+            ' <a href="' + assignUrl + '" class="vnext-btn vnext-btn-outline" style="text-decoration:none;"><i class="fas fa-user-plus"></i> Assign to Employees</a>';
+
+        // ===== Add Sub-Compliance button (only for Editable category) =====
+        if (canManage) {
+            actionsHtml +=
+                ' <button onclick="openAddSubModal()" class="btn btn-primary"><i class="fas fa-plus"></i> Add Sub-Compliance</button>';
         }
 
         document.getElementById("heroActions").innerHTML = actionsHtml;
@@ -2767,17 +2753,28 @@
                             '\')" class="btn btn-success btn-sm" title="Mark as Complete"><i class="fas fa-check-circle"></i> Mark as Complete</button>'
                         : '<button onclick="event.stopPropagation();openCompletionDetailsModal(' +
                             i +
-                            ')" class="btn btn-ghost btn-sm" title="View Details"><i class="fas fa-info-circle"></i> Details</button>')
+                            ')" class="btn btn-ghost btn-sm" title="View Details"><i class="fas fa-info-circle"></i> Details</button> ' +
+                          '<button onclick="event.stopPropagation();openMarkCompleteModal(' +
+                            complianceId +
+                            ",'" +
+                            escapeHtml(s.subTemplateName) +
+                            '\')" class="btn btn-ghost btn-sm" style="color:var(--primary);" title="Edit Completion Details"><i class="fas fa-edit"></i> Edit</button>')
                     : '<button class="btn btn-ghost btn-sm" disabled style="opacity:0.4;cursor:not-allowed;" title="Configure this sub-compliance first"><i class="fas fa-lock"></i> Not Configured</button>') +
-                // Show Configure/Edit ONLY for custom sub-compliances
-                (isCustom
+                // Show Configure/Edit/Delete ONLY for sub-compliances under Editable categories (canManage = true)
+                (parentData && parentData.canManage
                     ? (isConfigured
                         ? '<button onclick="event.stopPropagation();openConfigModalForSub(' +
                             s.subTemplateId +
-                            ')" class="btn btn-ghost btn-sm" title="Edit Configuration"><i class="fas fa-edit"></i></button>'
+                            ')" class="btn btn-ghost btn-sm" title="Edit Configuration"><i class="fas fa-cog"></i> Configure</button>' +
+                          ' <button onclick="event.stopPropagation();deleteSubCompliance(' +
+                            s.subTemplateId +
+                            ')" class="btn btn-danger btn-sm" title="Delete Sub-Compliance"><i class="fas fa-trash"></i></button>'
                         : '<button onclick="event.stopPropagation();openConfigModalForSub(' +
                             s.subTemplateId +
-                            ')" class="btn btn-success btn-sm" title="Configure"><i class="fas fa-cog"></i></button>')
+                            ')" class="btn btn-success btn-sm" title="Configure"><i class="fas fa-cog"></i> Configure</button>' +
+                          ' <button onclick="event.stopPropagation();deleteSubCompliance(' +
+                            s.subTemplateId +
+                            ')" class="btn btn-danger btn-sm" title="Delete Sub-Compliance"><i class="fas fa-trash"></i></button>')
                     : '') +
                 "</div>" +
                 "</div>" +
@@ -2837,7 +2834,7 @@
                         ? '<div class="comp-item"><div class="comp-label">Completed By</div><div class="comp-value">' +
                             escapeHtml(s.completedByName) +
                             "</div></div>"
-                        : '<div class="comp-item"><div class="comp-label">Completed By</div><div class="comp-value">Company Admin</div></div>') +
+                        : '<div class="comp-item"><div class="comp-label">Completed By</div><div class="comp-value">Assigned Employee</div></div>') +
                     (s.completedAt
                         ? '<div class="comp-item"><div class="comp-label">Completed On</div><div class="comp-value">' +
                             formatDateTime(s.completedAt) +
@@ -2901,8 +2898,8 @@
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
 
-        // Use the template-based endpoint
-        var data = await api('/api/company-admin/compliance/custom/template/' + templateId + '/sub-templates', {
+        // Use the editable compliance sub-template endpoint
+        var data = await api('/api/company-admin/compliance/editable/' + templateId + '/sub-templates', {
             method: 'POST',
             body: JSON.stringify(payload)
         });
@@ -2916,6 +2913,24 @@
             loadParentDetails();
         } else {
             toast(data?.error || 'Failed to add sub-compliance', 'error');
+        }
+    }
+
+    async function deleteSubCompliance(subTemplateId) {
+        if (!confirm('Are you sure you want to delete this sub-compliance?')) return;
+        try {
+            var data = await api('/api/company-admin/compliance/sub-templates/' + subTemplateId, {
+                method: 'DELETE'
+            });
+            if (data && data.success) {
+                toast('Sub-compliance deleted successfully', 'success');
+                loadParentDetails();
+            } else {
+                toast(data?.error || 'Failed to delete sub-compliance', 'error');
+            }
+        } catch (e) {
+            console.error('Error deleting sub-compliance:', e);
+            toast('Failed to delete sub-compliance', 'error');
         }
     }
 
@@ -3095,23 +3110,23 @@
         document.getElementById("markCompleteSubName").textContent =
             '"' + complianceName + '"';
 
-        // Check if already completed - use the correct endpoint
-        try {
-            // Get the current status from parentData
-            if (parentData && parentData.overallStatus === "COMPLETED") {
-                document.getElementById("markCompleteReference").value =
-                    parentData.targetEntry?.submissionReference ||
-                    parentData.parentEntry?.submissionReference || "";
-                document.getElementById("completionStatusInfo").style.display = "flex";
-                document.getElementById("markCompleteSaveBtn").innerHTML =
-                    '<i class="fas fa-edit"></i> Update';
-            } else {
-                document.getElementById("markCompleteReference").value = "";
-                document.getElementById("completionStatusInfo").style.display = "none";
-                document.getElementById("markCompleteSaveBtn").innerHTML =
-                    '<i class="fas fa-check-circle"></i> Mark as Complete';
-            }
-        } catch(e) {
+        var subObj = allSubCompliances.find(function(s) {
+            return s.id == complianceId || s.companyComplianceId == complianceId;
+        });
+
+        if (subObj && subObj.status === "COMPLETED") {
+            document.getElementById("markCompleteReference").value = subObj.submissionReference || "";
+            document.getElementById("completionStatusInfo").style.display = "flex";
+            document.getElementById("markCompleteSaveBtn").innerHTML =
+                '<i class="fas fa-edit"></i> Update Details';
+        } else if (parentData && parentData.overallStatus === "COMPLETED") {
+            document.getElementById("markCompleteReference").value =
+                parentData.targetEntry?.submissionReference ||
+                parentData.parentEntry?.submissionReference || "";
+            document.getElementById("completionStatusInfo").style.display = "flex";
+            document.getElementById("markCompleteSaveBtn").innerHTML =
+                '<i class="fas fa-edit"></i> Update Details';
+        } else {
             document.getElementById("markCompleteReference").value = "";
             document.getElementById("completionStatusInfo").style.display = "none";
             document.getElementById("markCompleteSaveBtn").innerHTML =
@@ -3208,7 +3223,8 @@
         }
 
         if (submissionDocumentUrl) {
-            html += '<div style="grid-column:1/-1;"><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.4px;font-weight:600;">Uploaded Document</div><div style="margin-top:6px;"><a href="' + submissionDocumentUrl + '" target="_blank" class="btn btn-ghost btn-sm" style="padding:6px 14px;"><i class="fas fa-file-alt"></i> View Document</a></div></div>';
+            var docHref = (submissionDocumentUrl.startsWith('/') ? contextPath + submissionDocumentUrl : submissionDocumentUrl);
+            html += '<div style="grid-column:1/-1;"><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.4px;font-weight:600;">Uploaded Document</div><div style="margin-top:6px;"><a href="' + docHref + '" target="_blank" class="btn btn-ghost btn-sm" style="padding:6px 14px;"><i class="fas fa-file-alt"></i> View Document</a></div></div>';
         }
 
         if (!submissionReference && !submissionDocumentUrl) {
@@ -3247,7 +3263,8 @@
         }
 
         if (submissionDocumentUrl) {
-            html += '<div style="grid-column:1/-1;"><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.4px;font-weight:600;">Uploaded Document</div><div style="margin-top:6px;"><a href="' + submissionDocumentUrl + '" target="_blank" class="btn btn-ghost btn-sm" style="padding:6px 14px;"><i class="fas fa-file-alt"></i> View Document</a></div></div>';
+            var docHref = (submissionDocumentUrl.startsWith('/') ? contextPath + submissionDocumentUrl : submissionDocumentUrl);
+            html += '<div style="grid-column:1/-1;"><div style="font-size:10px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.4px;font-weight:600;">Uploaded Document</div><div style="margin-top:6px;"><a href="' + docHref + '" target="_blank" class="btn btn-ghost btn-sm" style="padding:6px 14px;"><i class="fas fa-file-alt"></i> View Document</a></div></div>';
         }
 
         html += '</div></div>';

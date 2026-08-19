@@ -37,6 +37,7 @@ public class ComplianceService {
     private final EmailService emailService;
     private final ComplianceHistoryRepository historyRepository;
     private final ComplianceDocumentRepository documentRepository;
+    private final CompanyDocumentRepository companyDocumentRepository;
     private final NotificationEventService notificationEventService;
 
     @PersistenceContext
@@ -66,10 +67,12 @@ public class ComplianceService {
         ComplianceTemplate saved = templateRepository.save(template);
         log.info("Compliance template created with ID: {}", saved.getId());
 
-        // --- NEW: Auto‑assign if editable ---
+        // Auto-assign template to all active companies ONLY IF EDITABLE
         if (Boolean.TRUE.equals(saved.getEditableForCompanies())) {
-            log.info("Editable template created – auto‑assigning to all active companies");
+            log.info("Editable compliance template created – auto‑assigning to all active companies");
             assignComplianceToAllActiveCompanies(saved.getId(), adminId);
+        } else {
+            log.info("Non-editable compliance template created – will be assigned after sub-compliances are configured by SuperAdmin");
         }
 
         notificationEventService.notifySuperAdminsPushOnly(
@@ -97,8 +100,7 @@ public class ComplianceService {
         template.setName(dto.getName());
         template.setDescription(dto.getDescription());
         template.setPriority(dto.getPriority() != null ? dto.getPriority() : 0);
-        // NEW: update editableForCompanies
-        template.setEditableForCompanies(dto.getEditableForCompanies() != null && dto.getEditableForCompanies());
+        // Note: editableForCompanies is immutable once created. Do not overwrite existing value.
         template.setUpdatedBy(adminId);
 
         ComplianceTemplate saved = templateRepository.save(template);
@@ -187,6 +189,10 @@ public class ComplianceService {
         ComplianceSubTemplate subTemplate = subTemplateRepository.findByIdAndIsActiveTrue(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Sub-template not found"));
 
+        if (Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+            throw new BusinessException("SuperAdmin cannot edit sub-compliances for editable compliance categories.");
+        }
+
         subTemplate.setName(dto.getName());
         subTemplate.setDescription(dto.getDescription());
         subTemplate.setDisplayOrder(dto.getDisplayOrder() != null ? dto.getDisplayOrder() : 0);
@@ -194,6 +200,32 @@ public class ComplianceService {
 
         subTemplateRepository.save(subTemplate);
         log.info("Sub-template updated successfully with displayOrder: {}", subTemplate.getDisplayOrder());
+
+        return convertToSubTemplateDTO(subTemplate);
+    }
+
+    @Transactional
+    public ComplianceSubTemplateDTO updateCompanySubTemplate(Long id, Long companyId, ComplianceSubTemplateDTO dto, Long adminId) {
+        log.info("CompanyAdmin updating sub-template {} for company {}", id, companyId);
+
+        ComplianceSubTemplate subTemplate = subTemplateRepository.findByIdAndIsActiveTrue(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Sub-template not found"));
+
+        if (subTemplate.getCompany() == null || !subTemplate.getCompany().getId().equals(companyId)) {
+            throw new BusinessException("You do not have permission to edit this sub-compliance.");
+        }
+
+        if (!Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+            throw new BusinessException("Parent compliance is non-editable; sub-compliance cannot be modified.");
+        }
+
+        subTemplate.setName(dto.getName());
+        subTemplate.setDescription(dto.getDescription());
+        subTemplate.setDisplayOrder(dto.getDisplayOrder() != null ? dto.getDisplayOrder() : 0);
+        subTemplate.setUpdatedBy(adminId);
+
+        subTemplateRepository.save(subTemplate);
+        log.info("Company sub-template updated successfully with ID: {}", subTemplate.getId());
 
         return convertToSubTemplateDTO(subTemplate);
     }
@@ -307,6 +339,80 @@ public class ComplianceService {
         return subTemplates.stream()
                 .map(this::convertToSubTemplateDTO)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getEditableTemplateCompanySubCompliances(Long templateId) {
+        log.info("Fetching company sub-compliances for editable template: {}", templateId);
+
+        ComplianceTemplate template = templateRepository.findById(templateId)
+                .orElseThrow(() -> new ResourceNotFoundException("Compliance template not found with ID: " + templateId));
+
+        if (!Boolean.TRUE.equals(template.getEditableForCompanies())) {
+            throw new BusinessException("This compliance template is not editable.");
+        }
+
+        List<CompanyCompliance> parentCCs = companyComplianceRepository
+                .findByTemplateIdAndIsParentTrue(templateId);
+
+        List<Map<String, Object>> companyList = new ArrayList<>();
+
+        for (CompanyCompliance parentCC : parentCCs) {
+            Company company = parentCC.getCompany();
+            if (company == null || company.isDeleted()) continue;
+
+            Map<String, Object> companyMap = new HashMap<>();
+            companyMap.put("companyId", company.getId());
+            companyMap.put("companyName", company.getName());
+            companyMap.put("registrationNumber", company.getRegistrationNumber());
+
+            List<ComplianceSubTemplate> subTemplates = subTemplateRepository
+                    .findByParentTemplateIdAndCompanyIdAndIsActiveTrueOrderByDisplayOrderAsc(templateId, company.getId());
+
+            List<Map<String, Object>> subList = new ArrayList<>();
+            for (ComplianceSubTemplate sub : subTemplates) {
+                Map<String, Object> subMap = new HashMap<>();
+                subMap.put("id", sub.getId());
+                subMap.put("name", sub.getName());
+                subMap.put("description", sub.getDescription());
+                subMap.put("displayOrder", sub.getDisplayOrder());
+
+                Optional<CompanyCompliance> subCCOpt = companyComplianceRepository
+                        .findByCompanyIdAndSubTemplateId(company.getId(), sub.getId());
+
+                if (subCCOpt.isPresent()) {
+                    CompanyCompliance subCC = subCCOpt.get();
+                    subMap.put("companyComplianceId", subCC.getId());
+                    subMap.put("status", subCC.getStatus());
+
+                    Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(subCC.getId());
+                    subMap.put("isConfigured", configOpt.isPresent());
+                    if (configOpt.isPresent()) {
+                        ComplianceConfig config = configOpt.get();
+                        subMap.put("frequency", config.getFrequency() != null ? config.getFrequency().name() : null);
+                        LocalDate dueDate = calculateEffectiveDueDate(config);
+                        subMap.put("dueDate", dueDate != null ? dueDate.toString() : null);
+                    }
+                } else {
+                    subMap.put("isConfigured", false);
+                    subMap.put("status", ComplianceStatus.PENDING);
+                }
+                subList.add(subMap);
+            }
+
+            companyMap.put("subCompliancesCount", subList.size());
+            companyMap.put("subCompliances", subList);
+
+            companyList.add(companyMap);
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("templateId", template.getId());
+        result.put("templateName", template.getName());
+        result.put("companiesCount", companyList.size());
+        result.put("companies", companyList);
+
+        return result;
     }
 
     // ==================== ASSIGNMENT METHODS ====================
@@ -707,6 +813,10 @@ public class ComplianceService {
         ComplianceSubTemplate subTemplate = subTemplateRepository.findByIdAndIsActiveTrue(subTemplateId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sub-template not found"));
 
+        if (Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+            throw new BusinessException("SuperAdmin cannot configure sub-compliances for editable compliance categories. Companies manage their own sub-compliances.");
+        }
+
         // Get or create template‑level config
         Optional<ComplianceConfig> existingTemplateConfig = configRepository
                 .findBySubTemplateIdAndCompanyComplianceIsNull(subTemplateId);
@@ -759,6 +869,23 @@ public class ComplianceService {
         int assignedCount = 0;
 
         for (Company company : activeCompanies) {
+            // Ensure parent CompanyCompliance exists for this company
+            CompanyCompliance parentCC = companyComplianceRepository
+                    .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(company.getId(), subTemplate.getParentTemplate().getId())
+                    .orElse(null);
+            if (parentCC == null) {
+                parentCC = new CompanyCompliance();
+                parentCC.setCompany(company);
+                parentCC.setTemplate(subTemplate.getParentTemplate());
+                parentCC.setIsParent(true);
+                parentCC.setIsActive(true);
+                parentCC.setStatus(ComplianceStatus.IN_PROGRESS);
+                parentCC.setIsSuperAdminConfig(true);
+                parentCC.setCreatedBy(adminId);
+                parentCC.setAdminNotes("Auto-created parent category on sub-compliance configuration");
+                companyComplianceRepository.save(parentCC);
+            }
+
             CompanyCompliance companyCompliance = companyComplianceRepository
                     .findByCompanyIdAndSubTemplateId(company.getId(), subTemplateId)
                     .orElse(null);
@@ -1003,6 +1130,33 @@ public class ComplianceService {
         ComplianceSubTemplate subTemplate = subTemplateRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Sub-template not found"));
 
+        if (Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+            throw new BusinessException("Sub-compliances under editable compliance categories can only be managed by companies.");
+        }
+
+        performSubTemplateDeletion(subTemplate);
+    }
+
+    @Transactional
+    public void deleteCompanySubTemplatePermanently(Long id, Long companyId) {
+        log.info("CompanyAdmin (company {}) permanently deleting sub-template {}", companyId, id);
+
+        ComplianceSubTemplate subTemplate = subTemplateRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Sub-template not found"));
+
+        if (subTemplate.getCompany() == null || !subTemplate.getCompany().getId().equals(companyId)) {
+            throw new BusinessException("You do not have permission to delete this sub-compliance.");
+        }
+
+        if (!Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+            throw new BusinessException("Parent compliance is non-editable; sub-compliance cannot be deleted.");
+        }
+
+        performSubTemplateDeletion(subTemplate);
+    }
+
+    private void performSubTemplateDeletion(ComplianceSubTemplate subTemplate) {
+        Long id = subTemplate.getId();
         List<CompanyCompliance> companyCompliances = companyComplianceRepository
                 .findBySubTemplateId(id);
 
@@ -1212,7 +1366,7 @@ public class ComplianceService {
 
         CompanyCompliance companyCompliance = config.getCompanyCompliance();
 
-        if (!companyCompliance.getCompany().getId().equals(companyId)) {
+        if (companyCompliance != null && companyCompliance.getCompany() != null && !companyCompliance.getCompany().getId().equals(companyId)) {
             throw new BusinessException("Cannot assign this compliance to employees");
         }
 
@@ -1225,13 +1379,23 @@ public class ComplianceService {
                 continue;
             }
 
-            EmployeeAssignment assignment = new EmployeeAssignment();
-            assignment.setConfig(config);
-            assignment.setEmployeeId(employeeId);
-            assignment.setDueDate(config.getDueDate() != null ? config.getDueDate() : calculateDueDate(config));
-            assignment.setAssignedAt(LocalDateTime.now());
-            assignment.setIsActive(true);
-            assignment.setIsSubAssignment(false);
+            Optional<EmployeeAssignment> existing = assignmentRepository
+                    .findByConfigIdAndEmployeeIdAndIsActiveTrue(config.getId(), employeeId);
+
+            EmployeeAssignment assignment;
+            if (existing.isPresent()) {
+                assignment = existing.get();
+                assignment.setIsActive(true);
+            } else {
+                assignment = new EmployeeAssignment();
+                assignment.setConfig(config);
+                assignment.setEmployeeId(employeeId);
+                assignment.setDueDate(config.getDueDate() != null ? config.getDueDate() : calculateDueDate(config));
+                assignment.setAssignedAt(LocalDateTime.now());
+                assignment.setIsActive(true);
+                assignment.setIsSubAssignment(companyCompliance != null && !companyCompliance.isParent());
+                assignment.setParentAssignmentId(null);
+            }
 
             assignmentRepository.save(assignment);
 
@@ -1253,61 +1417,468 @@ public class ComplianceService {
 
     @Transactional
     public void assignParentWithSubCompliances(Long parentId, Long companyId, List<Long> employeeIds, Long adminId) {
-        log.info("Assigning parent compliance {} with sub-compliances to {} employees", parentId, employeeIds.size());
+        log.info("Assigning parent compliance {} with sub-compliances to {} employees for company {}", parentId, employeeIds != null ? employeeIds.size() : 0, companyId);
 
-        CompanyCompliance parentCC = companyComplianceRepository.findById(parentId)
-                .orElseThrow(() -> new ResourceNotFoundException("Parent compliance not found with ID: " + parentId));
-
-        if (!parentCC.getCompany().getId().equals(companyId)) {
-            throw new BusinessException("This compliance does not belong to your company");
+        if (employeeIds == null || employeeIds.isEmpty()) {
+            throw new BusinessException("Please select at least one employee");
         }
 
-        List<CompanyCompliance> subCompliances = companyComplianceRepository
-                .findByParentCompanyComplianceIdAndIsSubComplianceTrue(parentId);
+        // Support CompanyCompliance.id, templateId, or extracted template from any CompanyCompliance reference
+        CompanyCompliance parentCC = companyComplianceRepository.findById(parentId).orElse(null);
+        if (parentCC != null && parentCC.getCompany().getId().equals(companyId) && parentCC.isParent()) {
+            // Direct parent compliance match for this company
+        } else {
+            Long templateIdToLookup = (parentCC != null && parentCC.getTemplate() != null)
+                    ? parentCC.getTemplate().getId()
+                    : parentId;
+            parentCC = companyComplianceRepository
+                    .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, templateIdToLookup)
+                    .orElse(null);
 
-        if (subCompliances.isEmpty()) {
-            throw new BusinessException("No sub-compliances found for this parent");
-        }
-
-        for (CompanyCompliance subCC : subCompliances) {
-            ComplianceConfig config = configRepository.findByCompanyComplianceId(subCC.getId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Config not found for sub-compliance: " + subCC.getId()));
-
-            for (Long employeeId : employeeIds) {
-                User employee = userRepository.findById(employeeId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Employee not found: " + employeeId));
-
-                if (employee.getRole() != UserRole.EMPLOYEE) {
-                    log.warn("User {} is not an employee, skipping", employeeId);
-                    continue;
+            // Fallback 1: Check if any CompanyCompliance exists for this template & company
+            if (parentCC == null) {
+                List<CompanyCompliance> ccs = companyComplianceRepository
+                        .findByCompanyIdAndTemplateIdAndDeletedFalse(companyId, templateIdToLookup);
+                if (!ccs.isEmpty()) {
+                    parentCC = ccs.stream()
+                            .filter(c -> c.getSubTemplate() == null || (c.getIsParent() != null && c.getIsParent()))
+                            .findFirst()
+                            .orElse(ccs.get(0));
+                    if (parentCC.getIsParent() == null || !parentCC.getIsParent()) {
+                        parentCC.setIsParent(true);
+                        parentCC = companyComplianceRepository.save(parentCC);
+                    }
                 }
+            }
 
-                EmployeeAssignment assignment = new EmployeeAssignment();
-                assignment.setConfig(config);
-                assignment.setEmployeeId(employeeId);
-                assignment.setDueDate(config.getDueDate() != null ? config.getDueDate() : calculateDueDate(config));
-                assignment.setAssignedAt(LocalDateTime.now());
-                assignment.setIsActive(true);
-                assignment.setIsSubAssignment(true);
-                assignment.setParentAssignmentId(null);
-
-                assignmentRepository.save(assignment);
-
-                try {
-                    emailService.sendAssignmentEmail(
-                            employee.getEmail(),
-                            employee.getFirstName(),
-                            subCC.getSubTemplate().getName(),
-                            assignment.getDueDate()
-                    );
-                } catch (Exception e) {
-                    log.error("Failed to send assignment email to: {}", employee.getEmail(), e);
+            // Fallback 2: Check if template exists and auto-create parent CompanyCompliance for this company
+            if (parentCC == null) {
+                Optional<ComplianceTemplate> templateOpt = templateRepository.findById(templateIdToLookup);
+                if (templateOpt.isPresent()) {
+                    ComplianceTemplate template = templateOpt.get();
+                    parentCC = new CompanyCompliance();
+                    parentCC.setCompany(companyRepository.findById(companyId).orElse(null));
+                    parentCC.setTemplate(template);
+                    parentCC.setIsParent(true);
+                    parentCC.setIsActive(true);
+                    parentCC.setStatus(ComplianceStatus.PENDING);
+                    parentCC = companyComplianceRepository.save(parentCC);
                 }
             }
         }
 
+        if (parentCC == null) {
+            throw new ResourceNotFoundException("Parent compliance not found for company " + companyId + " with ID/Template " + parentId);
+        }
+
+        // 1. Ensure parent ComplianceConfig exists
+        ComplianceConfig parentConfig = configRepository.findByCompanyComplianceId(parentCC.getId()).orElse(null);
+        if (parentConfig == null) {
+            parentConfig = new ComplianceConfig();
+            parentConfig.setCompanyCompliance(parentCC);
+            parentConfig.setTemplate(parentCC.getTemplate());
+            parentConfig.setFrequency(ComplianceFrequency.YEARLY);
+            parentConfig.setDueDate(LocalDate.now().plusMonths(1));
+            parentConfig.setIsActive(true);
+            parentConfig.setConfiguredBy(adminId);
+            parentConfig = configRepository.save(parentConfig);
+        }
+
+        // 2. Fetch all active sub-compliances for this company & parent template
+        List<CompanyCompliance> subCompliances = companyComplianceRepository
+                .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, parentCC.getTemplate().getId());
+
+        // 3. For each employee, assign parent category and all sub-compliances
+        for (Long employeeId : employeeIds) {
+            User employee = userRepository.findById(employeeId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Employee not found with ID: " + employeeId));
+
+            if (employee.getCompany() == null || !employee.getCompany().getId().equals(companyId)) {
+                log.warn("Employee {} does not belong to company {}, skipping", employeeId, companyId);
+                continue;
+            }
+
+            if (employee.getRole() != UserRole.EMPLOYEE) {
+                log.warn("User {} is not an employee (role: {}), skipping", employeeId, employee.getRole());
+                continue;
+            }
+
+            // Create or get Parent EmployeeAssignment (isSubAssignment = false)
+            Optional<EmployeeAssignment> existingParentAssign = assignmentRepository
+                    .findByConfigIdAndEmployeeIdAndIsActiveTrue(parentConfig.getId(), employeeId);
+
+            EmployeeAssignment parentAssign;
+            if (existingParentAssign.isPresent()) {
+                parentAssign = existingParentAssign.get();
+                parentAssign.setIsActive(true);
+                parentAssign.setIsSubAssignment(false);
+                if (parentCC.getStatus() == ComplianceStatus.COMPLETED || parentCC.getCompletedAt() != null) {
+                    if (parentAssign.getCompletedAt() == null) {
+                        parentAssign.setCompletedAt(parentCC.getCompletedAt() != null ? parentCC.getCompletedAt() : LocalDateTime.now());
+                        parentAssign.setCompletedBy(parentCC.getCompletedBy());
+                        parentAssign.setSubmissionReference(parentCC.getAdminSubmissionReference());
+                        parentAssign.setSubmissionDocumentUrl(parentCC.getAdminSubmissionDocumentUrl());
+                    }
+                }
+                parentAssign = assignmentRepository.save(parentAssign);
+            } else {
+                parentAssign = new EmployeeAssignment();
+                parentAssign.setConfig(parentConfig);
+                parentAssign.setEmployeeId(employeeId);
+                parentAssign.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : LocalDate.now().plusMonths(1));
+                parentAssign.setAssignedAt(LocalDateTime.now());
+                parentAssign.setIsActive(true);
+                parentAssign.setIsSubAssignment(false);
+                parentAssign.setParentAssignmentId(null);
+                if (parentCC.getStatus() == ComplianceStatus.COMPLETED || parentCC.getCompletedAt() != null) {
+                    parentAssign.setCompletedAt(parentCC.getCompletedAt() != null ? parentCC.getCompletedAt() : LocalDateTime.now());
+                    parentAssign.setCompletedBy(parentCC.getCompletedBy());
+                    parentAssign.setSubmissionReference(parentCC.getAdminSubmissionReference());
+                    parentAssign.setSubmissionDocumentUrl(parentCC.getAdminSubmissionDocumentUrl());
+                }
+                parentAssign = assignmentRepository.save(parentAssign);
+            }
+
+            // If there are sub-compliances, auto-assign ALL of them to this employee linked to parent assignment
+            if (subCompliances != null && !subCompliances.isEmpty()) {
+                for (CompanyCompliance subCC : subCompliances) {
+                    ComplianceConfig subConfig = configRepository.findByCompanyComplianceId(subCC.getId()).orElse(null);
+                    if (subConfig == null) {
+                        subConfig = new ComplianceConfig();
+                        subConfig.setCompanyCompliance(subCC);
+                        subConfig.setTemplate(subCC.getTemplate());
+                        subConfig.setSubTemplate(subCC.getSubTemplate());
+                        subConfig.setFrequency(parentConfig.getFrequency() != null ? parentConfig.getFrequency() : ComplianceFrequency.YEARLY);
+                        subConfig.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : LocalDate.now().plusMonths(1));
+                        subConfig.setIsActive(true);
+                        subConfig.setConfiguredBy(adminId);
+                        subConfig = configRepository.save(subConfig);
+                    }
+
+                    Optional<EmployeeAssignment> existingSubAssign = assignmentRepository
+                            .findByConfigIdAndEmployeeIdAndIsActiveTrue(subConfig.getId(), employeeId);
+
+                    LocalDate subDueDate = subConfig.getDueDate() != null ? subConfig.getDueDate() : parentAssign.getDueDate();
+                    boolean subAlreadyCompleted = subCC.getStatus() == ComplianceStatus.COMPLETED || subCC.getCompletedAt() != null;
+
+                    if (existingSubAssign.isEmpty()) {
+                        EmployeeAssignment subAssign = new EmployeeAssignment();
+                        subAssign.setConfig(subConfig);
+                        subAssign.setEmployeeId(employeeId);
+                        subAssign.setDueDate(subDueDate);
+                        subAssign.setAssignedAt(LocalDateTime.now());
+                        subAssign.setIsActive(true);
+                        subAssign.setIsSubAssignment(true);
+                        subAssign.setParentAssignmentId(parentAssign.getId());
+                        if (subAlreadyCompleted) {
+                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                            subAssign.setCompletedBy(subCC.getCompletedBy());
+                            subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
+                            subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
+                        }
+                        assignmentRepository.save(subAssign);
+                    } else {
+                        EmployeeAssignment subAssign = existingSubAssign.get();
+                        subAssign.setIsActive(true);
+                        subAssign.setIsSubAssignment(true);
+                        subAssign.setParentAssignmentId(parentAssign.getId());
+                        if (subAssign.getDueDate() == null) {
+                            subAssign.setDueDate(subDueDate);
+                        }
+                        if (subAlreadyCompleted && subAssign.getCompletedAt() == null) {
+                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                            subAssign.setCompletedBy(subCC.getCompletedBy());
+                            subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
+                            subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
+                        }
+                        assignmentRepository.save(subAssign);
+                    }
+                }
+            }
+
+            // Send notification and email
+            try {
+                String parentName = parentCC.getTemplate() != null ? parentCC.getTemplate().getName() : "Compliance";
+                int subCount = subCompliances != null ? subCompliances.size() : 0;
+                String emailMsg = subCount > 0
+                        ? "You have been assigned to compliance \"" + parentName + "\" along with " + subCount + " sub-compliance task(s)."
+                        : "You have been assigned to compliance \"" + parentName + "\".";
+
+                emailService.sendAssignmentEmail(
+                        employee.getEmail(),
+                        employee.getFirstName(),
+                        parentName + (subCount > 0 ? " (" + subCount + " sub-compliances)" : ""),
+                        parentAssign.getDueDate()
+                );
+
+                notificationEventService.notifyUsersWithSave(
+                        List.of(employeeId),
+                        "New Compliance Assigned",
+                        emailMsg,
+                        NotificationType.COMPLIANCE_ASSIGNMENT_UPDATED,
+                        "employee_compliance"
+                );
+            } catch (Exception e) {
+                log.error("Failed to send assignment notification/email to employee {}: {}", employee.getEmail(), e.getMessage());
+            }
+        }
+
         log.info("Parent compliance {} assigned with {} sub-compliances to {} employees",
-                parentId, subCompliances.size(), employeeIds.size());
+                parentId, (subCompliances != null ? subCompliances.size() : 0), employeeIds.size());
+    }
+
+    @Transactional
+    public void assignMultipleParentCompliancesToEmployee(Long employeeId, List<Long> parentComplianceIds, Long companyId, Long adminId) {
+        log.info("Assigning {} parent compliances to employee ID {}", parentComplianceIds != null ? parentComplianceIds.size() : 0, employeeId);
+
+        if (parentComplianceIds == null || parentComplianceIds.isEmpty()) {
+            throw new BusinessException("Please select at least one parent compliance");
+        }
+
+        User employee = userRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found with ID: " + employeeId));
+
+        if (employee.getCompany() == null || !employee.getCompany().getId().equals(companyId)) {
+            throw new BusinessException("Employee does not belong to your company");
+        }
+
+        for (Long parentId : parentComplianceIds) {
+            assignParentWithSubCompliances(parentId, companyId, List.of(employeeId), adminId);
+        }
+    }
+
+    @Transactional
+    public void assignParentCompliancesToMultipleEmployees(List<Long> parentComplianceIds, List<Long> employeeIds, Long companyId, Long adminId) {
+        log.info("Assigning {} parent compliances to {} employees", parentComplianceIds != null ? parentComplianceIds.size() : 0, employeeIds != null ? employeeIds.size() : 0);
+
+        if (parentComplianceIds == null || parentComplianceIds.isEmpty()) {
+            throw new BusinessException("Please select at least one parent compliance");
+        }
+        if (employeeIds == null || employeeIds.isEmpty()) {
+            throw new BusinessException("Please select at least one employee");
+        }
+
+        for (Long parentId : parentComplianceIds) {
+            assignParentWithSubCompliances(parentId, companyId, employeeIds, adminId);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public Set<Long> getAssignedParentComplianceIdsForEmployee(Long employeeId, Long companyId) {
+        log.info("Fetching assigned parent compliance IDs for employee: {} in company: {}", employeeId, companyId);
+        List<EmployeeAssignment> assignments = assignmentRepository.findByEmployeeIdAndIsActiveTrue(employeeId);
+        Set<Long> parentIds = new HashSet<>();
+
+        for (EmployeeAssignment a : assignments) {
+            if (a.getConfig() != null && a.getConfig().getCompanyCompliance() != null) {
+                CompanyCompliance cc = a.getConfig().getCompanyCompliance();
+                if (cc.getCompany() != null && cc.getCompany().getId().equals(companyId) && Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted()) {
+                    if (cc.isParent() || cc.getSubTemplate() == null) {
+                        parentIds.add(cc.getId());
+                        if (cc.getTemplate() != null) {
+                            parentIds.add(cc.getTemplate().getId());
+                        }
+                    } else {
+                        Long tId = cc.getParentTemplateId() != null ? cc.getParentTemplateId() : (cc.getTemplate() != null ? cc.getTemplate().getId() : null);
+                        if (tId != null) {
+                            parentIds.add(tId);
+                            companyComplianceRepository
+                                    .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, tId)
+                                    .ifPresent(p -> parentIds.add(p.getId()));
+                        }
+                    }
+                }
+            }
+        }
+        return parentIds;
+    }
+
+    @Transactional(readOnly = true)
+    public Set<Long> getAssignedEmployeeIdsForParentCompliance(Long parentId, Long companyId) {
+        log.info("Fetching assigned employee IDs for parent compliance: {} in company: {}", parentId, companyId);
+        CompanyCompliance parentCC = companyComplianceRepository.findByIdAndDeletedFalse(parentId).orElse(null);
+        if (parentCC == null || !parentCC.getCompany().getId().equals(companyId)) {
+            parentCC = companyComplianceRepository
+                    .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, parentId)
+                    .orElse(null);
+        }
+
+        Long templateId = (parentCC != null && parentCC.getTemplate() != null)
+                ? parentCC.getTemplate().getId()
+                : parentId;
+
+        Set<Long> employeeIds = new HashSet<>();
+
+        // Check parent config assignments
+        if (parentCC != null) {
+            Optional<ComplianceConfig> parentConfigOpt = configRepository.findByCompanyComplianceId(parentCC.getId());
+            if (parentConfigOpt.isPresent()) {
+                List<EmployeeAssignment> pAssigns = assignmentRepository.findByConfigIdAndIsActiveTrue(parentConfigOpt.get().getId());
+                for (EmployeeAssignment pa : pAssigns) {
+                    if (pa.getEmployeeId() != null) employeeIds.add(pa.getEmployeeId());
+                }
+            }
+        }
+
+        // Also check sub-compliance assignments
+        List<CompanyCompliance> subCCs = companyComplianceRepository
+                .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, templateId);
+        for (CompanyCompliance subCC : subCCs) {
+            Optional<ComplianceConfig> subConfigOpt = configRepository.findByCompanyComplianceId(subCC.getId());
+            if (subConfigOpt.isPresent()) {
+                List<EmployeeAssignment> sAssigns = assignmentRepository.findByConfigIdAndIsActiveTrue(subConfigOpt.get().getId());
+                for (EmployeeAssignment sa : sAssigns) {
+                    if (sa.getEmployeeId() != null) employeeIds.add(sa.getEmployeeId());
+                }
+            }
+        }
+
+        return employeeIds;
+    }
+
+    @Transactional
+    public void removeParentComplianceFromEmployee(Long parentId, Long employeeId, Long companyId, Long adminId) {
+        log.info("Removing parent compliance {} from employee {} for company {} by admin {}", parentId, employeeId, companyId, adminId);
+
+        User employee = userRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found with ID: " + employeeId));
+
+        if (employee.getCompany() == null || !employee.getCompany().getId().equals(companyId)) {
+            throw new BusinessException("Employee does not belong to your company");
+        }
+
+        CompanyCompliance parentCC = companyComplianceRepository.findByIdAndDeletedFalse(parentId).orElse(null);
+        if (parentCC == null || !parentCC.getCompany().getId().equals(companyId)) {
+            parentCC = companyComplianceRepository
+                    .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, parentId)
+                    .orElse(null);
+        }
+
+        if (parentCC == null) {
+            // Check if parentId is actually a config ID or sub-compliance ID
+            Optional<ComplianceConfig> cfgOpt = configRepository.findById(parentId);
+            if (cfgOpt.isPresent() && cfgOpt.get().getCompanyCompliance() != null) {
+                CompanyCompliance cc = cfgOpt.get().getCompanyCompliance();
+                if (cc.getCompany() != null && cc.getCompany().getId().equals(companyId)) {
+                    if (cc.isParent() || cc.getSubTemplate() == null) {
+                        parentCC = cc;
+                    } else if (cc.getParentTemplateId() != null) {
+                        parentCC = companyComplianceRepository
+                                .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, cc.getParentTemplateId())
+                                .orElse(null);
+                    }
+                }
+            }
+        }
+
+        if (parentCC == null) {
+            log.warn("Parent compliance {} not found for company {}", parentId, companyId);
+            return;
+        }
+
+        Long templateId = parentCC.getTemplate().getId();
+
+        // 1. Delete parent assignment
+        Optional<ComplianceConfig> parentConfigOpt = configRepository.findByCompanyComplianceId(parentCC.getId());
+        Long parentAssignmentId = null;
+        if (parentConfigOpt.isPresent()) {
+            Optional<EmployeeAssignment> parentAssign = assignmentRepository
+                    .findByConfigIdAndEmployeeIdAndIsActiveTrue(parentConfigOpt.get().getId(), employeeId);
+            if (parentAssign.isPresent()) {
+                parentAssignmentId = parentAssign.get().getId();
+                assignmentRepository.delete(parentAssign.get());
+            }
+        }
+
+        // 2. Delete all sub-compliance assignments for this employee & parent template
+        List<CompanyCompliance> subCCs = companyComplianceRepository
+                .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, templateId);
+
+        for (CompanyCompliance subCC : subCCs) {
+            Optional<ComplianceConfig> subConfigOpt = configRepository.findByCompanyComplianceId(subCC.getId());
+            if (subConfigOpt.isPresent()) {
+                Optional<EmployeeAssignment> subAssign = assignmentRepository
+                        .findByConfigIdAndEmployeeIdAndIsActiveTrue(subConfigOpt.get().getId(), employeeId);
+                subAssign.ifPresent(assignmentRepository::delete);
+            }
+        }
+
+        // 3. Delete any orphaned sub-assignments linked by parentAssignmentId
+        if (parentAssignmentId != null) {
+            List<EmployeeAssignment> linkedSubs = assignmentRepository
+                    .findByParentAssignmentIdAndIsActiveTrue(parentAssignmentId);
+            for (EmployeeAssignment sa : linkedSubs) {
+                assignmentRepository.delete(sa);
+            }
+        }
+
+        // 4. Notify employee
+        try {
+            String parentName = parentCC.getTemplate() != null ? parentCC.getTemplate().getName() : "Compliance";
+            notificationEventService.notifyUserPushOnly(
+                    employeeId,
+                    "Compliance Unassigned",
+                    "Compliance category \"" + parentName + "\" has been removed from your assignments.",
+                    NotificationType.COMPLIANCE_ASSIGNMENT_UPDATED,
+                    "employee_compliance"
+            );
+        } catch (Exception e) {
+            log.warn("Failed to notify employee {} about compliance unassignment: {}", employeeId, e.getMessage());
+        }
+
+        log.info("Successfully removed parent compliance {} and sub-compliances from employee {}", parentId, employeeId);
+    }
+
+    @Transactional
+    public void syncParentCompliancesForEmployee(Long employeeId, List<Long> parentComplianceIds, Long companyId, Long adminId) {
+        log.info("Syncing parent compliances for employee ID: {}, target IDs: {}", employeeId, parentComplianceIds);
+        if (parentComplianceIds == null) {
+            parentComplianceIds = Collections.emptyList();
+        }
+
+        Set<Long> currentlyAssignedIds = getAssignedParentComplianceIdsForEmployee(employeeId, companyId);
+        Set<Long> desiredIds = new HashSet<>(parentComplianceIds);
+
+        // Add newly checked
+        Set<Long> toAdd = new HashSet<>(desiredIds);
+        toAdd.removeAll(currentlyAssignedIds);
+
+        // Remove unchecked
+        Set<Long> toRemove = new HashSet<>(currentlyAssignedIds);
+        toRemove.removeAll(desiredIds);
+
+        for (Long idToAdd : toAdd) {
+            assignParentWithSubCompliances(idToAdd, companyId, List.of(employeeId), adminId);
+        }
+
+        for (Long idToRemove : toRemove) {
+            removeParentComplianceFromEmployee(idToRemove, employeeId, companyId, adminId);
+        }
+    }
+
+    @Transactional
+    public void syncEmployeesForParentCompliance(Long parentId, List<Long> employeeIds, Long companyId, Long adminId) {
+        log.info("Syncing employees for parent compliance ID: {}, target employee IDs: {}", parentId, employeeIds);
+        if (employeeIds == null) {
+            employeeIds = Collections.emptyList();
+        }
+
+        Set<Long> currentlyAssignedEmployees = getAssignedEmployeeIdsForParentCompliance(parentId, companyId);
+        Set<Long> desiredEmployees = new HashSet<>(employeeIds);
+
+        Set<Long> toAdd = new HashSet<>(desiredEmployees);
+        toAdd.removeAll(currentlyAssignedEmployees);
+
+        Set<Long> toRemove = new HashSet<>(currentlyAssignedEmployees);
+        toRemove.removeAll(desiredEmployees);
+
+        if (!toAdd.isEmpty()) {
+            assignParentWithSubCompliances(parentId, companyId, new ArrayList<>(toAdd), adminId);
+        }
+
+        for (Long empIdToRemove : toRemove) {
+            removeParentComplianceFromEmployee(parentId, empIdToRemove, companyId, adminId);
+        }
     }
 
 
@@ -1326,42 +1897,76 @@ public class ComplianceService {
     public void removeCompanyFromCompliancePermanently(Long companyId, Long templateId, Long adminId) {
         log.info("Permanently removing company {} from template {} by admin {}", companyId, templateId, adminId);
 
-        // Find the parent CompanyCompliance for this company+template
-        Optional<CompanyCompliance> parentOpt = companyComplianceRepository
-                .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, templateId);
-        if (parentOpt.isEmpty()) {
-            throw new ResourceNotFoundException("No compliance assignment found for this company and template.");
-        }
-        CompanyCompliance parentCC = parentOpt.get();
+        // 1. Fetch all CompanyCompliance records (both parent and sub-compliances)
+        List<CompanyCompliance> allCompliances = companyComplianceRepository
+                .findAllByCompanyIdAndTemplateOrParentTemplateId(companyId, templateId);
 
-        // Delete all sub‑compliances
-        List<CompanyCompliance> subCompliances = companyComplianceRepository
-                .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, templateId);
+        // Deduplicate and separate sub-compliances from parent compliances so subs are deleted first
+        Map<Long, CompanyCompliance> distinctMap = new LinkedHashMap<>();
+        for (CompanyCompliance cc : allCompliances) {
+            if (cc != null && cc.getId() != null) {
+                distinctMap.put(cc.getId(), cc);
+            }
+        }
+
+        List<CompanyCompliance> subCompliances = new ArrayList<>();
+        List<CompanyCompliance> parentCompliances = new ArrayList<>();
+        for (CompanyCompliance cc : distinctMap.values()) {
+            if (cc.isSubCompliance() || Boolean.FALSE.equals(cc.getIsParent()) || cc.getParentTemplateId() != null || cc.getSubTemplate() != null) {
+                subCompliances.add(cc);
+            } else {
+                parentCompliances.add(cc);
+            }
+        }
+
+        // Delete all sub-compliances first
         for (CompanyCompliance subCC : subCompliances) {
             deleteCompanyCompliancePermanently(subCC);
         }
 
-        // Delete the parent
-        deleteCompanyCompliancePermanently(parentCC);
+        // Delete all parent compliances next
+        for (CompanyCompliance parentCC : parentCompliances) {
+            deleteCompanyCompliancePermanently(parentCC);
+        }
 
-        // Notifications
+        // 2. Delete company-specific sub-templates created for this parent template
+        List<ComplianceSubTemplate> companySubTemplates = subTemplateRepository
+                .findCompanySubTemplatesByParent(templateId, companyId);
+        for (ComplianceSubTemplate subTemplate : companySubTemplates) {
+            Long subId = subTemplate.getId();
+            log.info("Deleting company-specific sub-template ID: {}", subId);
+
+            List<Long> configIds = configRepository.findConfigIdsBySubTemplateId(subId);
+            for (Long cfgId : configIds) {
+                assignmentRepository.deleteByConfigId(cfgId);
+            }
+            configRepository.deleteAllBySubTemplateId(subId);
+            subTemplateRepository.delete(subTemplate);
+            log.info("Deleted company-specific sub-template ID: {}", subId);
+        }
+
+        // 3. Notifications
         Company company = companyRepository.findById(companyId).orElse(null);
         ComplianceTemplate template = templateRepository.findById(templateId).orElse(null);
         if (company != null && template != null) {
-            notificationEventService.notifySuperAdminsPushOnly(
-                    "Company Removed from Compliance",
-                    "Company " + company.getName() + " has been removed from \"" + template.getName() + "\".",
-                    NotificationType.COMPANY_REMOVED_FROM_COMPLIANCE,
-                    "compliance_details"
-            );
-            if (company.getCompanyAdmin() != null) {
-                notificationEventService.notifyUserPushOnly(
-                        company.getCompanyAdmin().getId(),
-                        "Compliance Removed",
-                        "Compliance \"" + template.getName() + "\" has been removed from your company.",
+            try {
+                notificationEventService.notifySuperAdminsPushOnly(
+                        "Company Removed from Compliance",
+                        "Company " + company.getName() + " has been removed from \"" + template.getName() + "\".",
                         NotificationType.COMPANY_REMOVED_FROM_COMPLIANCE,
                         "compliance_details"
                 );
+                if (company.getCompanyAdmin() != null) {
+                    notificationEventService.notifyUserPushOnly(
+                            company.getCompanyAdmin().getId(),
+                            "Compliance Removed",
+                            "Compliance \"" + template.getName() + "\" has been removed from your company.",
+                            NotificationType.COMPANY_REMOVED_FROM_COMPLIANCE,
+                            "compliance_details"
+                    );
+                }
+            } catch (Exception e) {
+                log.warn("Notification failed during removeCompanyFromCompliancePermanently: {}", e.getMessage());
             }
         }
 
@@ -1369,26 +1974,54 @@ public class ComplianceService {
     }
 
     private void deleteCompanyCompliancePermanently(CompanyCompliance companyCompliance) {
+        if (companyCompliance == null || companyCompliance.getId() == null) {
+            return;
+        }
         Long ccId = companyCompliance.getId();
+        log.info("Permanently deleting CompanyCompliance ID: {}", ccId);
 
+        // 1. Unlink any CompanyDocument records pointing to this CompanyCompliance
+        List<CompanyDocument> companyDocs = companyDocumentRepository.findByCompanyComplianceId(ccId);
+        if (companyDocs != null && !companyDocs.isEmpty()) {
+            for (CompanyDocument cd : companyDocs) {
+                cd.setCompanyCompliance(null);
+                companyDocumentRepository.save(cd);
+            }
+        }
+
+        // 2. Delete all ComplianceDocument records for this CompanyCompliance
+        List<ComplianceDocument> documents = documentRepository.findByCompanyComplianceId(ccId);
+        if (documents != null && !documents.isEmpty()) {
+            documentRepository.deleteAll(documents);
+        }
+
+        // 3. Delete all ComplianceHistory records for this CompanyCompliance
+        List<ComplianceHistory> histories = historyRepository.findByCompanyComplianceId(ccId);
+        if (histories != null && !histories.isEmpty()) {
+            historyRepository.deleteAll(histories);
+        }
+
+        // 4. Find config(s) linked to this CompanyCompliance and delete their employee assignments and config
         Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(ccId);
         if (configOpt.isPresent()) {
             ComplianceConfig config = configOpt.get();
-            List<EmployeeAssignment> assignments = assignmentRepository
-                    .findByConfigIdAndIsActiveTrue(config.getId());
-            if (assignments != null && !assignments.isEmpty()) {
-                assignmentRepository.deleteAll(assignments);
-            }
+            assignmentRepository.deleteByConfigId(config.getId());
+            companyCompliance.setConfig(null);
+            config.setCompanyCompliance(null);
             configRepository.delete(config);
         }
 
-        List<ComplianceHistory> histories = historyRepository.findByCompanyComplianceId(ccId);
-        if (histories != null && !histories.isEmpty()) historyRepository.deleteAll(histories);
+        if (companyCompliance.getConfig() != null) {
+            ComplianceConfig directConfig = companyCompliance.getConfig();
+            assignmentRepository.deleteByConfigId(directConfig.getId());
+            companyCompliance.setConfig(null);
+            directConfig.setCompanyCompliance(null);
+            configRepository.delete(directConfig);
+        }
 
-        List<ComplianceDocument> documents = documentRepository.findByCompanyComplianceId(ccId);
-        if (documents != null && !documents.isEmpty()) documentRepository.deleteAll(documents);
-
+        // 5. Delete the CompanyCompliance itself
         companyComplianceRepository.delete(companyCompliance);
+        log.info("CompanyCompliance ID: {} deleted successfully", ccId);
     }
 
     // ==================== VIEW METHODS ====================
@@ -1489,31 +2122,21 @@ public class ComplianceService {
 
     @Transactional
     public void deleteAssignment(Long assignmentId) {
-        log.info("Soft deleting compliance assignment: {}", assignmentId);
+        log.info("Permanently deleting compliance assignment: {}", assignmentId);
 
         CompanyCompliance assignment = companyComplianceRepository.findById(assignmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Assignment not found"));
 
-        assignment.setIsActive(false);
-        assignment.setDeleted(true);
-
-        if (assignment.getConfig() != null) {
-            List<EmployeeAssignment> employeeAssignments = assignmentRepository
-                    .findByConfigIdAndIsActiveTrue(assignment.getConfig().getId());
-            for (EmployeeAssignment empAssignment : employeeAssignments) {
-                empAssignment.setIsActive(false);
-                assignmentRepository.save(empAssignment);
-            }
-            log.info("Deactivated {} employee assignments", employeeAssignments.size());
+        if (assignment.isParent() && assignment.getTemplate() != null && assignment.getCompany() != null) {
+            removeCompanyFromCompliancePermanently(
+                    assignment.getCompany().getId(),
+                    assignment.getTemplate().getId(),
+                    SecurityUtils.getCurrentUserId()
+            );
+        } else {
+            deleteCompanyCompliancePermanently(assignment);
         }
-
-        addHistoryForCompanyCompliance(assignment, assignment.getStatus(),
-                ComplianceStatus.PENDING, "Removed from Company",
-                "Compliance removed from company by SuperAdmin",
-                userRepository.findById(SecurityUtils.getCurrentUserId()).orElse(null));
-
-        companyComplianceRepository.save(assignment);
-        log.info("Compliance assignment {} soft deleted successfully", assignmentId);
+        log.info("Compliance assignment {} permanently deleted successfully", assignmentId);
     }
 
     // ==================== COMPLIANCE CONFIG RETRIEVAL ====================
@@ -2093,6 +2716,7 @@ public class ComplianceService {
             dto.setIsActive(template.getIsActive());
             dto.setIsCompanySpecific(template.getIsCompanySpecific());
             dto.setPriority(template.getPriority());
+            dto.setEditableForCompanies(template.getEditableForCompanies() != null && template.getEditableForCompanies());
             dto.setCreatedAt(template.getCreatedAt());
             dto.setUpdatedAt(template.getUpdatedAt());
             dto.setSubTemplateCount(subCountMap.getOrDefault(template.getId(), 0));
@@ -2514,6 +3138,7 @@ public class ComplianceService {
             dto.setPriority(cc.getTemplate().getPriority() != null ? cc.getTemplate().getPriority() : 0);
         }
 
+        dto.setIsParent(cc.isParent());
         dto.setStatus(cc.getStatus());
         dto.setAssignedAt(cc.getCreatedAt());
         dto.setNotes(cc.getAdminNotes());

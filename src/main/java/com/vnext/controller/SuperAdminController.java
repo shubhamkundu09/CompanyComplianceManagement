@@ -6,6 +6,7 @@ import com.vnext.exception.BusinessException;
 import com.vnext.exception.ResourceNotFoundException;
 import com.vnext.repository.*;
 import com.vnext.security.CurrentUser;
+import com.vnext.security.SecurityUtils;
 import com.vnext.service.CompanyService;
 import com.vnext.service.ComplianceService;
 import com.vnext.service.EmployeeService;
@@ -230,6 +231,12 @@ public class SuperAdminController {
         return ApiResponse.success(templates, "Compliances retrieved successfully");
     }
 
+    @GetMapping("/compliance/templates/{templateId}/company-sub-compliances")
+    public ApiResponse<Map<String, Object>> getCompanySubCompliancesForEditableTemplate(@PathVariable Long templateId) {
+        Map<String, Object> result = complianceService.getEditableTemplateCompanySubCompliances(templateId);
+        return ApiResponse.success(result, "Company sub-compliances retrieved successfully");
+    }
+
     @GetMapping("/compliance/sub-templates/{id}/config")
     public ApiResponse<ComplianceConfigDTO> getSubTemplateConfig(@PathVariable Long id) {
         ComplianceConfigDTO config = complianceService.getSubTemplateConfig(id);
@@ -393,8 +400,19 @@ public class SuperAdminController {
 
     @DeleteMapping("/compliance/assignments/{id}")
     public ApiResponse<Void> deleteAssignment(@PathVariable Long id) {
-        complianceService.deleteAssignment(id);
-        return ApiResponse.success("Assignment deleted successfully");
+        try {
+            complianceService.deleteAssignment(id);
+            return ApiResponse.success("Assignment deleted successfully");
+        } catch (ResourceNotFoundException e) {
+            log.error("Resource not found when deleting assignment {}: {}", id, e.getMessage());
+            return ApiResponse.error(e.getMessage(), 404);
+        } catch (BusinessException e) {
+            log.error("Business exception when deleting assignment {}: {}", id, e.getMessage());
+            return ApiResponse.error(e.getMessage(), 400);
+        } catch (Exception e) {
+            log.error("Error deleting assignment {}: {}", id, e.getMessage(), e);
+            return ApiResponse.error("Failed to delete assignment: " + e.getMessage(), 500);
+        }
     }
 
     @DeleteMapping("/compliance/companies/{companyId}/templates/{templateId}")
@@ -403,8 +421,23 @@ public class SuperAdminController {
             @PathVariable Long templateId,
             @CurrentUser User admin) {
         log.info("Permanently removing company {} from template {}", companyId, templateId);
-        complianceService.removeCompanyFromCompliancePermanently(companyId, templateId, admin.getId());
-        return ApiResponse.success("Company removed from compliance permanently");
+        try {
+            Long adminId = admin != null ? admin.getId() : SecurityUtils.getCurrentUserId();
+            if (adminId == null) {
+                adminId = 1L;
+            }
+            complianceService.removeCompanyFromCompliancePermanently(companyId, templateId, adminId);
+            return ApiResponse.success("Company removed from compliance permanently");
+        } catch (ResourceNotFoundException e) {
+            log.error("Resource not found when removing company {} from template {}: {}", companyId, templateId, e.getMessage());
+            return ApiResponse.error(e.getMessage(), 404);
+        } catch (BusinessException e) {
+            log.error("Business exception when removing company {} from template {}: {}", companyId, templateId, e.getMessage());
+            return ApiResponse.error(e.getMessage(), 400);
+        } catch (Exception e) {
+            log.error("Error permanently removing company {} from template {}: {}", companyId, templateId, e.getMessage(), e);
+            return ApiResponse.error("Failed to remove company from compliance: " + e.getMessage(), 500);
+        }
     }
 
     @PostMapping("/compliance/assign")

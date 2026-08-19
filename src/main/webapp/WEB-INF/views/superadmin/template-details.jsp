@@ -1,7 +1,7 @@
 <%-- File: superadmin/template-details.jsp --%>
 <%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8" %>
 <%
-    Long templateIdObj = (Long) request.getAttribute("templateId");
+    Object templateIdObj = request.getAttribute("templateId");
     String templateId = templateIdObj != null ? String.valueOf(templateIdObj) : null;
 
     if (templateId == null || templateId.trim().isEmpty()) {
@@ -1630,6 +1630,21 @@
                 <div id="configDetails" class="config-grid"></div>
             </div>
 
+            <!-- ==================== COMPANY CREATED SUB-COMPLIANCES SECTION (FOR EDITABLE COMPLIANCE) ==================== -->
+            <div id="editableCompanySubSection" class="card section-card" style="display:none;">
+                <div class="section-header">
+                    <div class="section-title">
+                        <i class="fas fa-building-user"></i> Company Sub-Compliances (Editable Category)
+                    </div>
+                    <button onclick="loadCompanySubCompliancesForEditable()" class="btn btn-ghost btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div id="editableCompanySubGrid">
+                    <div class="empty-state"><i class="fas fa-spinner fa-spin"></i> Loading company sub-compliances...</div>
+                </div>
+            </div>
+
             <!-- ==================== SUB-COMPLIANCES SECTION ==================== -->
             <div id="subSection" class="card section-card" style="display:none;">
                 <div class="section-header">
@@ -1647,7 +1662,7 @@
             </div>
 
             <!-- ==================== ASSIGNED COMPANIES SECTION ==================== -->
-            <div class="card section-card">
+            <div class="card section-card" id="assignedCompaniesSection">
                 <div class="section-header">
                     <div class="section-title">
                         <i class="fas fa-building"></i> Assigned Companies
@@ -2185,70 +2200,89 @@
                var statusClass = templateData.isActive ? 'badge-active' : 'badge-inactive';
                document.getElementById('statusBadge').innerHTML = '<span class="badge ' + statusClass + '"><i class="fas fa-circle" style="font-size:5px;margin-right:4px;"></i> ' + (templateData.isActive ? 'Active' : 'Inactive') + '</span>';
 
-               var typeLabel = templateData.isCompanySpecific ? 'Company Specific' : 'Global';
-               document.getElementById('typeBadge').innerHTML = '<span class="badge badge-info"><i class="fas fa-globe"></i> ' + typeLabel + '</span>';
+               var isEditable = templateData.editableForCompanies === true;
+               var typeBadgeHtml = isEditable
+                   ? '<span class="badge badge-warning" style="background:rgba(245,158,11,0.15);color:#d97706;border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
+                   : '<span class="badge badge-primary" style="background:rgba(79,70,229,0.15);color:var(--primary);border:1px solid rgba(79,70,229,0.3);"><i class="fas fa-lock"></i> Non-Editable Category</span>';
+               document.getElementById('typeBadge').innerHTML = typeBadgeHtml;
 
                await Promise.all([
                    loadSubCompliances(),
                    loadParentConfig(),
                    loadAssignedCompanies()
-               ]);
-
-               document.getElementById('loader').style.display = 'none';
-               document.getElementById('pageContent').style.display = 'block';
-               console.log('Page loaded successfully');
-           } else {
-               toast('Failed to load template details', 'error');
-           }
-       } catch (error) {
-           console.error('Error loading template:', error);
-           toast('Error loading template details', 'error');
-       }
+                ]);
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('pageContent').style.display = 'block';
+                console.log('Page loaded successfully');
+            } else {
+                document.getElementById('loader').style.display = 'none';
+                if (data && data.error === 'Authentication required') {
+                    window.location.href = contextPath + '/login?error=Session expired';
+                } else {
+                    toast(data?.error || 'Failed to load template details', 'error');
+                }
+            }
+        } catch (error) {
+            console.error('Error loading template:', error);
+            document.getElementById('loader').style.display = 'none';
+            toast('Error loading template details', 'error');
+        }
    }
 
- async function loadSubCompliances() {
-     console.log('Loading sub-compliances for parent:', TEMPLATE_ID);
+  async function loadSubCompliances() {
+      console.log('Loading sub-compliances for parent:', TEMPLATE_ID);
 
-     try {
-         var data = await api('/api/super-admin/compliance/sub-templates?parentId=' + TEMPLATE_ID);
-         console.log('Sub-compliances data:', data);
+      if (templateData && templateData.editableForCompanies === true) {
+          subCompliances = [];
+          renderSubCompliances();
+          updateUI();
+          return;
+      }
 
-         if (data && data.success) {
-             subCompliances = data.data || [];
-             console.log('Loaded ' + subCompliances.length + ' sub-compliances');
+      try {
+          var data = await api('/api/super-admin/compliance/sub-templates?parentId=' + TEMPLATE_ID);
+          console.log('Sub-compliances data:', data);
 
-             // Check if each sub-compliance is configured
-             for (var i = 0; i < subCompliances.length; i++) {
-                 // ===== Ensure displayOrder is preserved =====
-                 // The API already returns displayOrder in the DTO
-                 console.log('Sub-compliance:', subCompliances[i].name, 'Display Order:', subCompliances[i].displayOrder);
+          if (data && data.success) {
+              subCompliances = data.data || [];
+              console.log('Loaded ' + subCompliances.length + ' sub-compliances');
 
-                 try {
-                     var configData = await api('/api/super-admin/compliance/sub-templates/' + subCompliances[i].id + '/config');
-                     if (configData && configData.success && configData.data) {
-                         subCompliances[i].isConfigured = true;
-                         subCompliances[i].configDetails = configData.data;
-                     } else {
-                         subCompliances[i].isConfigured = false;
-                         subCompliances[i].configDetails = null;
-                     }
-                 } catch (e) {
-                     subCompliances[i].isConfigured = false;
-                     subCompliances[i].configDetails = null;
-                 }
-             }
+              for (var i = 0; i < subCompliances.length; i++) {
+                  try {
+                      var configData = await api('/api/super-admin/compliance/sub-templates/' + subCompliances[i].id + '/config');
+                      if (configData && configData.success && configData.data) {
+                          subCompliances[i].isConfigured = true;
+                          subCompliances[i].configDetails = configData.data;
+                      } else {
+                          subCompliances[i].isConfigured = false;
+                          subCompliances[i].configDetails = null;
+                      }
+                  } catch (e) {
+                      subCompliances[i].isConfigured = false;
+                      subCompliances[i].configDetails = null;
+                  }
+              }
 
-             renderSubCompliances();
-             updateUI();
-         }
-     } catch (error) {
-         console.error('Error loading sub-compliances:', error);
-     }
- }
+              renderSubCompliances();
+              updateUI();
+          }
+      } catch (error) {
+          console.error('Error loading sub-compliances:', error);
+      }
+  }
 
     // ==================== LOAD PARENT CONFIG ====================
     async function loadParentConfig() {
         console.log('Loading parent config for template:', TEMPLATE_ID);
+
+        if (templateData && templateData.editableForCompanies === true) {
+            parentConfig = null;
+            document.getElementById('configSection').style.display = 'none';
+            document.getElementById('editParentConfigBtn').style.display = 'none';
+            document.getElementById('configureParentBtn').style.display = 'none';
+            updateUI();
+            return;
+        }
 
         try {
             var data = await api('/api/super-admin/compliance/config?templateId=' + TEMPLATE_ID);
@@ -2409,27 +2443,36 @@
         document.getElementById("pendingCount").textContent = pending;
 
         // ---- Now handle visibility based on editable flag ----
+        var editableSubSection = document.getElementById("editableCompanySubSection");
+        var assignedCompaniesSection = document.getElementById("assignedCompaniesSection");
+        var statsGrid = document.querySelector(".stats-grid");
+
         if (isEditable) {
             // ---- Editable compliance ----
-            // SuperAdmin cannot add sub‑compliances, configure, or edit config
+            // SuperAdmin cannot add sub‑compliances, configure, edit config, or manually assign
             addSubBtn.style.display = "none";
             configureBtn.style.display = "none";
             editConfigBtn.style.display = "none";
+            assignBtn.style.display = "none";
 
-            // Assign button: show only if not yet assigned to any company
-            assignBtn.style.display = (uniqueCompaniesCount > 0) ? "none" : "inline-flex";
-            if (assignBtn.style.display !== "none") {
-                assignBtn.innerHTML = '<i class="fas fa-users"></i> Assign to Companies';
+            // Hide parent config section, global subSection, assignedCompaniesSection, and statsGrid
+            configSection.style.display = "none";
+            subSection.style.display = "none";
+            if (assignedCompaniesSection) assignedCompaniesSection.style.display = "none";
+            if (statsGrid) statsGrid.style.display = "none";
+
+            if (editableSubSection) {
+                editableSubSection.style.display = "block";
+                loadCompanySubCompliancesForEditable();
             }
 
-            // Hide parent config section entirely
-            configSection.style.display = "none";
-
-            // Show sub‑section only if there are sub‑compliances (created by companies)
-            subSection.style.display = hasSubs ? "block" : "none";
-
-            // We exit early because all other logic is for non‑editable
             return;
+        } else {
+            if (assignedCompaniesSection) assignedCompaniesSection.style.display = "block";
+            if (statsGrid) statsGrid.style.display = "grid";
+            if (editableSubSection) {
+                editableSubSection.style.display = "none";
+            }
         }
 
         // ---- Non‑editable compliance (original logic) ----
@@ -2469,6 +2512,73 @@
             assignBtn.innerHTML = '<i class="fas fa-users"></i> Assign to Companies';
         } else {
             assignBtn.style.display = "none";
+        }
+    }
+
+    async function loadCompanySubCompliancesForEditable() {
+        var container = document.getElementById("editableCompanySubGrid");
+        if (!container) return;
+
+        try {
+            var data = await api('/api/super-admin/compliance/templates/' + TEMPLATE_ID + '/company-sub-compliances');
+            if (data && data.success && data.data) {
+                var companies = data.data.companies || [];
+                if (companies.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><i class="fas fa-building"></i> No active companies assigned to this compliance category yet.</div>';
+                    return;
+                }
+
+                var html = '';
+                for (var i = 0; i < companies.length; i++) {
+                    var comp = companies[i];
+                    var subs = comp.subCompliances || [];
+                    
+                    html += '<div style="margin-bottom:20px;padding:20px;background:var(--gray-50);border-radius:var(--radius);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);">';
+                    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--gray-200);">';
+                    html += '<div><strong style="font-size:16px;color:var(--gray-900);"><i class="fas fa-building" style="color:var(--primary);margin-right:8px;"></i>' + escapeHtml(comp.companyName) + '</strong>';
+                    if (comp.registrationNumber) {
+                        html += ' <span style="font-size:12px;color:var(--gray-500);">(' + escapeHtml(comp.registrationNumber) + ')</span>';
+                    }
+                    html += '</div>';
+                    html += '<span class="badge badge-info" style="font-weight:600;font-size:12px;padding:4px 10px;">' + subs.length + ' Sub-compliance(s)</span>';
+                    html += '</div>';
+
+                    if (subs.length === 0) {
+                        html += '<p style="font-size:13px;color:var(--gray-500);font-style:italic;padding:8px 0;margin:0;">No sub-compliances created by this company yet.</p>';
+                    } else {
+                        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px;">';
+                        for (var j = 0; j < subs.length; j++) {
+                            var s = subs[j];
+                            var statusCls = getStatusClass(s.status);
+                            html += '<div style="background:white;padding:14px;border-radius:var(--radius);border:1px solid var(--gray-200);box-shadow:var(--shadow-sm);">';
+                            html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">';
+                            html += '<strong style="font-size:14px;color:var(--gray-900);">' + escapeHtml(s.name) + '</strong>';
+                            html += '<span class="badge ' + statusCls + '">' + getStatusLabel(s.status) + '</span>';
+                            html += '</div>';
+                            if (s.description) {
+                                html += '<p style="font-size:12px;color:var(--gray-600);margin-bottom:8px;">' + escapeHtml(s.description) + '</p>';
+                            }
+                            if (s.isConfigured || s.frequency || s.dueDate) {
+                                html += '<div style="font-size:12px;color:var(--gray-600);display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:1px dashed var(--gray-200);">';
+                                if (s.frequency) html += '<span><i class="fas fa-redo" style="color:var(--primary);margin-right:4px;"></i>' + getFrequencyLabel(s.frequency) + '</span>';
+                                if (s.dueDate) html += '<span><i class="fas fa-calendar-alt" style="color:var(--primary);margin-right:4px;"></i>' + formatDate(s.dueDate) + '</span>';
+                                html += '</div>';
+                            } else {
+                                html += '<span style="font-size:11px;color:var(--warning);"><i class="fas fa-clock"></i> Not Configured</span>';
+                            }
+                            html += '</div>';
+                        }
+                        html += '</div>';
+                    }
+                    html += '</div>';
+                }
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i> Failed to load company sub-compliances</div>';
+            }
+        } catch (e) {
+            console.error('Error loading company sub-compliances:', e);
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i> Failed to load company sub-compliances</div>';
         }
     }
 

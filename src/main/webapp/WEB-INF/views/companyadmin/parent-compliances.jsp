@@ -688,9 +688,6 @@
            <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item active">
                <i class="fas fa-tasks"></i> My Compliances
            </a>
-           <a href="${baseUrl}/company-admin/compliance/custom/create" class="nav-item">
-               <i class="fas fa-plus-circle"></i> Custom Compliance
-           </a>
 
            <div class="sidebar-label">Communication</div>
            <a href="${baseUrl}/company-admin/notifications" class="nav-item ">
@@ -752,7 +749,7 @@
         <div style="margin-bottom:24px;">
             <p style="font-size:12px;color:var(--primary);font-weight:600;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Compliance Management</p>
             <h1 style="font-size:24px;font-weight:700;color:var(--gray-900);">My Compliances</h1>
-            <p style="font-size:13px;color:var(--gray-500);margin-top:4px;">Compliance categories assigned to your company. Configure and assign them to employees.</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-top:4px;">Compliance categories assigned to your company. Add sub-compliances for editable categories and assign them to employees.</p>
         </div>
 
         <!-- Info Banner -->
@@ -760,9 +757,9 @@
             <i class="fas fa-info-circle"></i>
             <div class="info-text">
                 <strong>How it works:</strong>
-                1. SuperAdmin creates and configures compliances. &nbsp;|&nbsp;
-                2. You <strong>assign</strong> them to employees. &nbsp;|&nbsp;
-                3. You can also create <strong>custom compliances</strong> for your company.
+                1. SuperAdmin assigns compliance categories to your company. &nbsp;|&nbsp;
+                2. For <strong>Editable Categories</strong>, you can add and configure sub-compliances. &nbsp;|&nbsp;
+                3. You assign compliances to your employees.
             </div>
         </div>
 
@@ -771,9 +768,9 @@
             <div class="stat-card">
                 <div class="stat-top">
                     <div>
-                        <div class="stat-label">Total Compliances</div>
+                        <div class="stat-label">Total Categories</div>
                         <div class="stat-value" id="statTotal">—</div>
-                        <div class="stat-sub">All categories</div>
+                        <div class="stat-sub">Assigned by SuperAdmin</div>
                     </div>
                     <div class="stat-icon blue"><i class="fas fa-tags"></i></div>
                 </div>
@@ -781,21 +778,21 @@
             <div class="stat-card">
                 <div class="stat-top">
                     <div>
-                        <div class="stat-label">SuperAdmin Created</div>
-                        <div class="stat-value" id="statSuperAdmin" style="color:var(--primary);">—</div>
-                        <div class="stat-sub">Managed by SuperAdmin</div>
+                        <div class="stat-label">Editable Categories</div>
+                        <div class="stat-value" id="statEditable" style="color:var(--warning);">—</div>
+                        <div class="stat-sub">Can add sub-compliances</div>
                     </div>
-                    <div class="stat-icon blue"><i class="fas fa-user-shield"></i></div>
+                    <div class="stat-icon yellow"><i class="fas fa-edit"></i></div>
                 </div>
             </div>
             <div class="stat-card">
                 <div class="stat-top">
                     <div>
-                        <div class="stat-label">Custom (Your Own)</div>
-                        <div class="stat-value" id="statCustom">—</div>
-                        <div class="stat-sub">Created by you</div>
+                        <div class="stat-label">Non-Editable</div>
+                        <div class="stat-value" id="statNonEditable" style="color:var(--primary);">—</div>
+                        <div class="stat-sub">Admin Managed</div>
                     </div>
-                    <div class="stat-icon green"><i class="fas fa-user-tie"></i></div>
+                    <div class="stat-icon blue"><i class="fas fa-lock"></i></div>
                 </div>
             </div>
             <div class="stat-card">
@@ -816,9 +813,9 @@
                 <div class="filter-item">
                     <label class="form-label">Filter by Type</label>
                     <select id="typeFilter" class="form-input">
-                        <option value="all">All Compliances</option>
-                        <option value="superadmin">SuperAdmin Created</option>
-                        <option value="custom">Custom (Your Own)</option>
+                        <option value="all">All Categories</option>
+                        <option value="editable">Editable (Company Sub-Compliances)</option>
+                        <option value="noneditable">Non-Editable (Admin Managed)</option>
                     </select>
                 </div>
                 <div class="filter-item">
@@ -841,7 +838,6 @@
             </div>
             <div class="filter-actions">
                 <button onclick="refreshList()" class="btn btn-ghost"><i class="fas fa-sync-alt"></i> Refresh</button>
-                <a href="${baseUrl}/company-admin/compliance/custom/create?mode=new" class="btn btn-primary"><i class="fas fa-plus"></i> Create Custom</a>
                 <a href="${baseUrl}/company-admin/compliance/calendar" class="btn btn-ghost"><i class="fas fa-calendar-alt"></i> Calendar View</a>
             </div>
         </div>
@@ -860,10 +856,7 @@
             <div class="empty-state">
                 <i class="fas fa-clipboard-list"></i>
                 <p>No compliance categories assigned</p>
-                <p class="sub-text">SuperAdmin will assign categories, or you can create your own custom compliances.</p>
-                <a href="${baseUrl}/company-admin/compliance/custom/create?mode=new" class="btn btn-primary" style="margin-top:12px;">
-                    <i class="fas fa-plus"></i> Create Custom Compliance
-                </a>
+                <p class="sub-text">SuperAdmin will assign compliance categories to your company.</p>
             </div>
         </div>
 
@@ -994,177 +987,173 @@
     }
 
     // ==================== BUILD PARENT CARD (VNext Style) ====================
-   function buildParentCard(item) {
-       var isSA = item.isSuperAdmin;
-       var isConfigured = item.isConfigured;
-       var hasSubs = item.subCompliances && item.subCompliances.length > 0;
-       var totalSubs = hasSubs ? item.subCompliances.length : 0;
-       var configuredSubs = hasSubs
-           ? item.subCompliances.filter(function (s) { return s.isConfigured; }).length
-           : 0;
-       var subCompliances = hasSubs ? item.subCompliances : [];
+    function buildParentCard(item) {
+        var canManage = item.canManage === true || item.editableForCompanies === true;
+        var isConfigured = item.isConfigured;
+        var hasSubs = item.subCompliances && item.subCompliances.length > 0;
+        var totalSubs = hasSubs ? item.subCompliances.length : 0;
+        var configuredSubs = hasSubs
+            ? item.subCompliances.filter(function (s) { return s.isConfigured; }).length
+            : 0;
+        var subCompliances = hasSubs ? item.subCompliances : [];
+        var priority = item.priority || 0;
 
-       // ===== GET PRIORITY =====
-              var priority = item.priority || 0;
+        var cardBlinkerCls = hasSubs
+            ? getCardBlinkerFromSubs(subCompliances)
+            : getBlinkerClass(item.dueDate, item.status);
 
-              // ===== CARD-LEVEL BLINKER (from subs, or own due date if no subs) =====
-              var cardBlinkerCls = hasSubs
-                  ? getCardBlinkerFromSubs(subCompliances)
-                  : getBlinkerClass(item.dueDate, item.status);
+        var statusBadgeClass = getVNextBadgeClass(item.status);
+        var statusIcon = getStatusIconClass(item.status);
+        var statusLabel = getStatusInfo(item.status).label;
+        var cardIcon = getComplianceIcon(item.templateName || item.name || "");
 
-       var statusBadgeClass = getVNextBadgeClass(item.status);
-       var statusIcon = getStatusIconClass(item.status);
-       var statusLabel = getStatusInfo(item.status).label;
-       var cardIcon = getComplianceIcon(item.templateName || item.name || "");
+        var complianceId = item.id || item.templateId || item.companyComplianceId || null;
+        if (!complianceId || complianceId === "null" || complianceId === "undefined") complianceId = null;
+        var hasValidId = complianceId !== null;
 
-       var complianceId = item.templateId || item.id || item.companyComplianceId || null;
-       if (!complianceId || complianceId === "null" || complianceId === "undefined") complianceId = null;
-       var hasValidId = complianceId !== null;
+        var configLabel, configIcon, configBadgeClass;
+        if (hasSubs) {
+            if (configuredSubs > 0 && configuredSubs === totalSubs) {
+                configLabel = "All Configured";
+                configIcon = "fa-check-circle";
+                configBadgeClass = "vnext-badge-completed";
+            } else if (configuredSubs > 0) {
+                configLabel = configuredSubs + "/" + totalSubs + " Configured";
+                configIcon = "fa-clock";
+                configBadgeClass = "vnext-badge-warning";
+            } else {
+                configLabel = "Not Configured";
+                configIcon = "fa-clock";
+                configBadgeClass = "vnext-badge-warning";
+            }
+        } else {
+            if (isConfigured) {
+                configLabel = "Configured";
+                configIcon = "fa-check-circle";
+                configBadgeClass = "vnext-badge-completed";
+            } else {
+                configLabel = "Not Configured";
+                configIcon = "fa-clock";
+                configBadgeClass = "vnext-badge-warning";
+            }
+        }
 
-       // Determine config badge
-       var configLabel, configIcon, configBadgeClass;
-       if (hasSubs) {
-           if (configuredSubs > 0 && configuredSubs === totalSubs) {
-               configLabel = "All Configured";
-               configIcon = "fa-check-circle";
-               configBadgeClass = "vnext-badge-completed";
-           } else if (configuredSubs > 0) {
-               configLabel = configuredSubs + "/" + totalSubs + " Configured";
-               configIcon = "fa-clock";
-               configBadgeClass = "vnext-badge-warning";
-           } else {
-               configLabel = "Not Configured";
-               configIcon = "fa-clock";
-               configBadgeClass = "vnext-badge-warning";
-           }
-       } else {
-           if (isConfigured) {
-               configLabel = "Configured";
-               configIcon = "fa-check-circle";
-               configBadgeClass = "vnext-badge-completed";
-           } else {
-               configLabel = "Not Configured";
-               configIcon = "fa-clock";
-               configBadgeClass = "vnext-badge-warning";
-           }
-       }
+        var priorityBadge = '<span class="vnext-badge" style="background:rgba(79,70,229,0.1);color:var(--primary);border:1px solid rgba(79,70,229,0.2);">' +
+            '<i class="fas fa-sort-numeric-down"></i> Priority: ' + priority +
+            '</span>';
 
-       // ===== PRIORITY BADGE =====
-       var priorityBadge = '<span class="vnext-badge" style="background:rgba(79,70,229,0.1);color:var(--primary);border:1px solid rgba(79,70,229,0.2);">' +
-           '<i class="fas fa-sort-numeric-down"></i> Priority: ' + priority +
-           '</span>';
+        var subListHtml = "";
+        if (hasSubs && subCompliances.length > 0) {
+            subListHtml = '<div class="vnext-sub-list"><div class="vnext-sub-list-title"><i class="fas fa-list" style="margin-right:4px;"></i>Sub-Compliances (' + totalSubs + ')</div>';
+            var displaySubs = subCompliances.slice(0, 5);
+            for (var j = 0; j < displaySubs.length; j++) {
+                var s = displaySubs[j];
+                var bCls = getBlinkerClass(s.dueDate, s.status);
+                var sBadge = getVNextBadgeClass(s.status);
+                var sLabel = getStatusInfo(s.status).label;
+                var sDue = s.dueDate ? formatDate(s.dueDate) : "—";
+                var days = s.dueDate ? getDaysRemaining(s.dueDate) : null;
+                var daysLabel = "";
+                var dueCls = "";
+                if (days !== null && !isNaN(days) && s.status !== "COMPLETED") {
+                    if (days < 0) {
+                        daysLabel = " (OD)";
+                        dueCls = "overdue";
+                    } else if (days <= 7) {
+                        daysLabel = " (" + days + "d)";
+                        dueCls = days <= 3 ? "warning" : "";
+                    }
+                }
+                subListHtml +=
+                    '<div class="vnext-sub-item">' +
+                    '<span class="vnext-sub-bullet"></span>' +
+                    '<span class="vnext-sub-name" title="' + escapeHtml(s.name) + '">' + escapeHtml(s.name) + "</span>" +
+                    '<div class="vnext-sub-right">' +
+                    '<span class="vnext-due-label ' + dueCls + '">' + sDue + daysLabel + "</span>" +
+                    (bCls ? '<span class="vnext-blinker ' + bCls + '"></span>' : "") +
+                    '<span class="vnext-badge ' + sBadge + '" style="font-size:9px;padding:2px 6px;">' + sLabel + "</span>" +
+                    "</div></div>";
+            }
+            if (totalSubs > 5) {
+                subListHtml += '<div class="vnext-more-subs"><i class="fas fa-ellipsis-h"></i> +' + (totalSubs - 5) + " more</div>";
+            }
+            subListHtml += "</div>";
+        } else if (item.dueDate) {
+            var bCls = getBlinkerClass(item.dueDate, item.status);
+            var days = getDaysRemaining(item.dueDate);
+            var daysLabel = "";
+            if (days !== null && !isNaN(days) && item.status !== "COMPLETED") {
+                daysLabel = days < 0 ? " (Overdue)" : " (" + days + " day" + (days === 1 ? "" : "s") + ")";
+            }
+            subListHtml =
+                '<div class="vnext-no-sub-due">' +
+                '<i class="fas fa-calendar-alt"></i>' +
+                "<span>Due: " + formatDate(item.dueDate) + daysLabel + "</span>" +
+                (bCls ? '<span class="vnext-blinker ' + bCls + '"></span>' : "") +
+                "</div>";
+        } else if (canManage) {
+            subListHtml =
+                '<div class="vnext-no-sub-due" style="color:var(--gray-500);font-style:italic;">' +
+                '<i class="fas fa-info-circle" style="color:var(--primary);"></i>' +
+                '<span>No sub-compliances added yet. Click to manage.</span>' +
+                '</div>';
+        }
 
-       // Sub-list HTML
-       var subListHtml = "";
-       if (hasSubs && subCompliances.length > 0) {
-           subListHtml = '<div class="vnext-sub-list"><div class="vnext-sub-list-title"><i class="fas fa-list" style="margin-right:4px;"></i>Sub-Compliances</div>';
-           var displaySubs = subCompliances.slice(0, 5);
-           for (var j = 0; j < displaySubs.length; j++) {
-               var s = displaySubs[j];
-               var bCls = getBlinkerClass(s.dueDate, s.status);
-               var sBadge = getVNextBadgeClass(s.status);
-               var sLabel = getStatusInfo(s.status).label;
-               var sDue = s.dueDate ? formatDate(s.dueDate) : "—";
-               var days = s.dueDate ? getDaysRemaining(s.dueDate) : null;
-               var daysLabel = "";
-               var dueCls = "";
-               if (days !== null && !isNaN(days) && s.status !== "COMPLETED") {
-                   if (days < 0) {
-                       daysLabel = " (OD)";
-                       dueCls = "overdue";
-                   } else if (days <= 7) {
-                       daysLabel = " (" + days + "d)";
-                       dueCls = days <= 3 ? "warning" : "";
-                   }
-               }
-               subListHtml +=
-                   '<div class="vnext-sub-item">' +
-                   '<span class="vnext-sub-bullet"></span>' +
-                   '<span class="vnext-sub-name" title="' + escapeHtml(s.name) + '">' + escapeHtml(s.name) + "</span>" +
-                   '<div class="vnext-sub-right">' +
-                   '<span class="vnext-due-label ' + dueCls + '">' + sDue + daysLabel + "</span>" +
-                   (bCls ? '<span class="vnext-blinker ' + bCls + '"></span>' : "") +
-                   '<span class="vnext-badge ' + sBadge + '" style="font-size:9px;padding:2px 6px;">' + sLabel + "</span>" +
-                   "</div></div>";
-           }
-           if (totalSubs > 5) {
-               subListHtml += '<div class="vnext-more-subs"><i class="fas fa-ellipsis-h"></i> +' + (totalSubs - 5) + " more</div>";
-           }
-           subListHtml += "</div>";
-       } else if (item.dueDate) {
-           var bCls = getBlinkerClass(item.dueDate, item.status);
-           var days = getDaysRemaining(item.dueDate);
-           var daysLabel = "";
-           if (days !== null && !isNaN(days) && item.status !== "COMPLETED") {
-               daysLabel = days < 0 ? " (Overdue)" : " (" + days + " day" + (days === 1 ? "" : "s") + ")";
-           }
-           subListHtml =
-               '<div class="vnext-no-sub-due">' +
-               '<i class="fas fa-calendar-alt"></i>' +
-               "<span>Due: " + formatDate(item.dueDate) + daysLabel + "</span>" +
-               (bCls ? '<span class="vnext-blinker ' + bCls + '"></span>' : "") +
-               "</div>";
-       }
+        var clickFn = hasValidId
+            ? "window.location.href='" + contextPath + "/company-admin/compliance/parent/" + complianceId + "'"
+            : "void(0)";
 
-       // Footer buttons
-       var showAssign = hasSubs && configuredSubs > 0;
-       var showConfigure = !isSA && hasValidId;
-       var clickFn = hasValidId
-           ? "window.location.href='" + contextPath + "/company-admin/compliance/parent/" + complianceId + "'"
-           : "void(0)";
+        var footerHtml = "";
+        if (hasValidId) {
+            if (canManage) {
+                footerHtml +=
+                    '<a href="' + contextPath + "/company-admin/compliance/parent/" + complianceId + '" class="vnext-btn vnext-btn-primary" style="flex:1;text-align:center;padding:7px 10px;font-size:12px;" onclick="event.stopPropagation();"><i class="fas fa-plus"></i> Manage</a>';
+            } else {
+                footerHtml +=
+                    '<a href="' + contextPath + "/company-admin/compliance/parent/" + complianceId + '" class="vnext-btn vnext-btn-ghost" style="flex:1;text-align:center;padding:7px 10px;font-size:12px;" onclick="event.stopPropagation();" title="View Details"><i class="fas fa-arrow-right"></i> View Details</a>';
+            }
+            footerHtml +=
+                '<a href="' + contextPath + "/company-admin/compliance/parent/" + complianceId + '/assign" class="vnext-btn vnext-btn-outline" style="text-align:center;padding:7px 12px;font-size:12px;" onclick="event.stopPropagation();" title="Assign to Employees"><i class="fas fa-user-plus"></i> Assign</a>';
+        }
 
-       var footerHtml = "";
+        var categoryBadge = canManage
+            ? '<span class="vnext-badge vnext-badge-warning" style="background:rgba(245,158,11,0.15);color:var(--warning);border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
+            : '<span class="vnext-badge vnext-badge-info"><i class="fas fa-lock"></i> Non-Editable</span>';
 
+        var metaItem = canManage
+            ? '<span class="vnext-meta-item" style="color:var(--warning);"><i class="fas fa-unlock"></i> Can Add Sub-Compliances</span>'
+            : '<span class="vnext-meta-item"><i class="fas fa-lock"></i> Read-only</span>';
 
-       if (hasValidId) {
-           footerHtml +=
-               '<a href="' + contextPath + "/company-admin/compliance/parent/" + complianceId + '" class="vnext-btn vnext-btn-ghost" style="flex: auto;padding:7px 10px;" onclick="event.stopPropagation();" title="View Details"><i class="fas fa-arrow-right"></i></a>';
-       }
-       if (!footerHtml) {
-           footerHtml =
-               '<button class="vnext-btn vnext-btn-ghost" style="opacity:0.5;cursor:not-allowed;" disabled><i class="fas fa-spinner"></i> Loading...</button>';
-       }
-       if (!isSA && hasValidId) {
-           footerHtml +=
-               '<button class="vnext-btn vnext-btn-ghost" style="color:var(--danger);border-color:rgba(239,68,68,0.25);" ' +
-               'onclick="event.stopPropagation();deleteCustomCompliance(' + complianceId + ", '" + escapeHtml(item.templateName || item.name) + "')\">" +
-               '<i class="fas fa-trash"></i> Delete</button>';
-       }
+        return (
+            '<div class="compliance-card" style="position:relative;" onclick="' + clickFn + '">' +
+            (cardBlinkerCls ? '<span class="vnext-blinker ' + cardBlinkerCls + '" style="position:absolute;top:10px;right:10px;z-index:2;"></span>' : '') +
+            '<div class="vnext-card-body">' +
+            '<div class="vnext-card-top">' +
+            '<div class="vnext-card-icon"><i class="fas ' + cardIcon + '"></i></div>' +
+            '<div class="vnext-card-title-block">' +
+            '<div class="vnext-card-title">' + escapeHtml(item.templateName || item.name || "Compliance") + "</div>" +
+            '<div class="vnext-card-badges">' +
+            '<span class="vnext-badge ' + statusBadgeClass + '"><i class="fas ' + statusIcon + '"></i> ' + statusLabel + "</span>" +
+            categoryBadge +
+            '<span class="vnext-badge ' + configBadgeClass + '"><i class="fas ' + configIcon + '"></i> ' + configLabel + "</span>" +
+            priorityBadge +
+            "</div>" +
+            "</div>" +
+            "</div>" +
+            '<div class="vnext-card-meta">' +
+            (item.frequency ? '<span class="vnext-meta-item"><i class="fas fa-redo"></i>' + getFrequencyLabel(item.frequency) + "</span>" : "") +
+            '<span class="vnext-meta-item"><i class="fas fa-sitemap"></i>' + totalSubs + " sub(s)</span>" +
+            metaItem +
+            "</div>" +
+            subListHtml +
+            "</div>" +
+            '<div class="vnext-card-footer" style="padding:12px 16px;background:var(--gray-50);border-top:1px solid var(--gray-200);display:flex;gap:8px;">' +
+            footerHtml +
+            "</div>" +
+            "</div>"
+        );
+    }
 
-       // ===== BUILD THE CARD HTML WITH PRIORITY BADGE =====
-       return (
-                  '<div class="compliance-card" style="position:relative;" onclick="' + clickFn + '">' +
-                  (cardBlinkerCls
-                      ? '<span class="vnext-blinker ' + cardBlinkerCls + '" style="position:absolute;top:10px;right:10px;z-index:2;"></span>'
-                      : '') +
-                  '<div class="vnext-card-body">' +
-           '<div class="vnext-card-top">' +
-           '<div class="vnext-card-icon"><i class="fas ' + cardIcon + '"></i></div>' +
-           '<div class="vnext-card-title-block">' +
-           '<div class="vnext-card-title">' + escapeHtml(item.templateName || item.name || "Compliance") + "</div>" +
-           '<div class="vnext-card-badges">' +
-           '<span class="vnext-badge ' + statusBadgeClass + '"><i class="fas ' + statusIcon + '"></i> ' + statusLabel + "</span>" +
-           '<span class="vnext-badge ' + (isSA ? "vnext-badge-info" : "vnext-badge-custom") + '"><i class="fas ' + (isSA ? "fa-user-shield" : "fa-user-tie") + '"></i> ' + (isSA ? "Admin" : "Custom") + "</span>" +
-           '<span class="vnext-badge ' + configBadgeClass + '"><i class="fas ' + configIcon + '"></i> ' + configLabel + "</span>" +
-           priorityBadge +  // <-- PRIORITY BADGE
-           "</div>" +
-           "</div>" +
-           "</div>" +
-           '<div class="vnext-card-meta">' +
-           (item.frequency ? '<span class="vnext-meta-item"><i class="fas fa-redo"></i>' + getFrequencyLabel(item.frequency) + "</span>" : "") +
-           '<span class="vnext-meta-item"><i class="fas fa-sitemap"></i>' + totalSubs + " sub(s)</span>" +
-           (isSA
-               ? '<span class="vnext-meta-item"><i class="fas fa-lock"></i>Read-only</span>'
-               : '<span class="vnext-meta-item"><i class="fas fa-unlock"></i>Editable</span>') +
-           "</div>" +
-           subListHtml +
-           "</div>" +
-           '<div class="vnext-card-footer">' + footerHtml + "</div>" +
-           "</div>"
-       );
-   }
-
-    // ==================== SIDEBAR / LOGOUT / NOTIFICATIONS ====================
     function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
 
     document.addEventListener('click', function(e) {
@@ -1208,30 +1197,6 @@
     }
 
 
-
-    async function deleteCustomCompliance(templateId, name) {
-        if (!confirm('Delete "' + name + '" permanently? This will remove all its configuration, sub-compliances, and employee assignments. This cannot be undone.')) {
-            return;
-        }
-        try {
-            var token = localStorage.getItem('accessToken');
-            var response = await fetch(contextPath + '/api/company-admin/compliance/custom/templates/' + templateId, {
-                method: 'DELETE',
-                headers: { 'Authorization': 'Bearer ' + token }
-            });
-            var data = await response.json();
-            if (data && data.success) {
-                toast('Compliance deleted', 'success');
-                loadData();
-            } else {
-                toast(data && data.error ? data.error : 'Delete failed', 'error');
-            }
-        } catch (e) {
-            console.error('Delete error:', e);
-            toast('Delete failed. Please try again.', 'error');
-        }
-    }
-
     function formatTimeAgo(dateStr) {
         if (!dateStr) return 'Just now';
         try {
@@ -1260,7 +1225,6 @@
     });
 
     // ==================== LOAD DATA ====================
-    // ==================== LOAD DATA ====================
     async function loadData() {
         document.getElementById('loader').style.display = 'block';
         document.getElementById('complianceGrid').style.display = 'none';
@@ -1270,12 +1234,9 @@
             var assignedData = await api('/api/company-admin/compliance/assigned');
             var allAssigned = assignedData && assignedData.success ? assignedData.data || [] : [];
 
-            var customData = await api('/api/company-admin/compliance/custom/templates');
-            var customList = customData && customData.success ? customData.data || [] : [];
-
             var parentMap = {};
             var today = new Date();
-            today.setHours(0, 0, 0, 0); // start of day for overdue check
+            today.setHours(0, 0, 0, 0);
 
             for (var i = 0; i < allAssigned.length; i++) {
                 var item = allAssigned[i];
@@ -1284,11 +1245,13 @@
                 var isParent = !item.subTemplateId;
 
                 if (!parentMap[templateId]) {
+                    var canManage = item.canManage === true || item.editableForCompanies === true;
                     parentMap[templateId] = {
                         templateId: templateId,
+                        id: item.companyComplianceId || item.id,
                         templateName: item.templateName || 'Unknown',
-                        isSuperAdmin: item.isSuperAdminConfig !== false,
-                        isCustom: item.isSuperAdminConfig === false,
+                        canManage: canManage,
+                        editableForCompanies: canManage,
                         subCompliances: [],
                         parentConfig: null,
                         status: 'PENDING',
@@ -1309,8 +1272,14 @@
                     parentMap[templateId].frequency = item.frequency;
                     parentMap[templateId].description = item.description;
                     parentMap[templateId].companyComplianceId = item.companyComplianceId || item.id;
+                    parentMap[templateId].id = item.id || item.companyComplianceId;
                     parentMap[templateId].createdAt = item.createdAt;
                     parentMap[templateId].priority = item.priority || 0;
+                    if (item.canManage !== undefined || item.editableForCompanies !== undefined) {
+                        var isEditable = item.canManage === true || item.editableForCompanies === true;
+                        parentMap[templateId].canManage = isEditable;
+                        parentMap[templateId].editableForCompanies = isEditable;
+                    }
                     parentMap[templateId].parentConfig = {
                         id: item.id,
                         status: item.status,
@@ -1319,7 +1288,6 @@
                         configured: item.configured
                     };
                 } else {
-                    // Sub‑compliance – compute overdue status
                     var subStatus = item.status || 'PENDING';
                     if (item.dueDate) {
                         var due = new Date(item.dueDate);
@@ -1346,35 +1314,8 @@
                 }
             }
 
-            for (var i = 0; i < customList.length; i++) {
-                var custom = customList[i];
-                var customId = custom.id;
-                if (!customId) continue;
-                if (!parentMap[customId]) {
-                    parentMap[customId] = {
-                        templateId: customId,
-                        id: customId,
-                        templateName: custom.name,
-                        isSuperAdmin: false,
-                        isCustom: true,
-                        subCompliances: [],
-                        parentConfig: null,
-                        status: 'PENDING',
-                        isConfigured: false,
-                        dueDate: null,
-                        frequency: null,
-                        description: custom.description,
-                        createdAt: custom.createdAt,
-                        companyComplianceId: customId,
-                        companyName: custom.companyName,
-                        priority: custom.priority || 0
-                    };
-                }
-            }
-
             groupedCompliances = Object.values(parentMap);
 
-            // Sort by priority
             groupedCompliances.sort(function(a, b) {
                 var priorityA = a.priority || 0;
                 var priorityB = b.priority || 0;
@@ -1382,7 +1323,6 @@
                 return (a.templateName || "").localeCompare(b.templateName || "");
             });
 
-            // Compute overall status using the effective sub‑statuses
             for (var i = 0; i < groupedCompliances.length; i++) {
                 var group = groupedCompliances[i];
                 var subs = group.subCompliances;
@@ -1397,7 +1337,6 @@
                     else group.status = 'PENDING';
                     group.isConfigured = subs.some(function(s) { return s.isConfigured === true; });
                 } else {
-                    // No sub‑compliances – check parent due date for overdue
                     if (group.dueDate) {
                         var due = new Date(group.dueDate);
                         due.setHours(0, 0, 0, 0);
@@ -1422,25 +1361,26 @@
 
     // ==================== UPDATE STATS ====================
     function updateStats() {
-        var total      = groupedCompliances.length;
-        var sa         = groupedCompliances.filter(function(i) { return i.isSuperAdmin; }).length;
-        var custom     = total - sa;
+        var total = groupedCompliances.length;
+        var editableCount = groupedCompliances.filter(function(i) { return i.canManage === true; }).length;
+        var nonEditableCount = total - editableCount;
         var configured = groupedCompliances.filter(function(i) { return i.isConfigured; }).length;
+
         document.getElementById('statTotal').textContent = total;
-        document.getElementById('statSuperAdmin').textContent = sa;
-        document.getElementById('statCustom').textContent = custom;
+        document.getElementById('statEditable').textContent = editableCount;
+        document.getElementById('statNonEditable').textContent = nonEditableCount;
         document.getElementById('statConfigured').textContent = configured;
     }
 
     // ==================== FILTERS ====================
     function applyFilters() {
-        var typeFilter   = document.getElementById('typeFilter').value;
+        var typeFilter = document.getElementById('typeFilter').value;
         var statusFilter = document.getElementById('statusFilter').value;
-        var searchTerm   = document.getElementById('searchInput').value.toLowerCase();
+        var searchTerm = document.getElementById('searchInput').value.toLowerCase();
 
         filteredCompliances = groupedCompliances.filter(function(item) {
-            if (typeFilter === 'superadmin' && !item.isSuperAdmin) return false;
-            if (typeFilter === 'custom' && item.isSuperAdmin) return false;
+            if (typeFilter === 'editable' && !item.canManage) return false;
+            if (typeFilter === 'noneditable' && item.canManage) return false;
             if (statusFilter !== 'all' && (item.status || 'PENDING') !== statusFilter) return false;
             if (searchTerm && !item.templateName.toLowerCase().includes(searchTerm)) return false;
             return true;
@@ -1477,6 +1417,95 @@
     var searchTimeout;
     document.getElementById('searchInput').addEventListener('input', function() { clearTimeout(searchTimeout); searchTimeout = setTimeout(applyFilters, 300); });
 
+    // ==================== ASSIGN TO EMPLOYEES MODAL ====================
+    var selectedAssignParentId = null;
+
+    async function openAssignModalForParent(parentId, parentName) {
+        selectedAssignParentId = parentId;
+        document.getElementById('modalParentTitle').textContent = 'Assign "' + parentName + '" to employees';
+        document.getElementById('modalEmployeesList').innerHTML = '<div style="text-align:center;padding:20px;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading employees...</div>';
+        document.getElementById('assignEmployeesModal').style.display = 'flex';
+
+        try {
+            var res = await api('/api/company-admin/employees?page=0&size=1000');
+            var employees = (res && res.data) ? (res.data.content || res.data) : [];
+            renderEmployeesChecklist(employees);
+        } catch(e) {
+            document.getElementById('modalEmployeesList').innerHTML = '<div style="color:var(--danger);padding:15px;text-align:center;">Failed to load employees.</div>';
+        }
+    }
+
+    function renderEmployeesChecklist(employees) {
+        if (!employees || !employees.length) {
+            document.getElementById('modalEmployeesList').innerHTML = '<div style="padding:20px;color:var(--gray-500);text-align:center;">No active employees found. Please add employees first.</div>';
+            return;
+        }
+
+        var html = '<div style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">' +
+            '<label style="font-size:12px;font-weight:600;cursor:pointer;color:var(--gray-700);"><input type="checkbox" onchange="toggleSelectAllEmps(this)" style="margin-right:6px;"> Select All (' + employees.length + ' Employees)</label>' +
+        '</div><div style="display:flex;flex-direction:column;gap:8px;">';
+
+        for (var i = 0; i < employees.length; i++) {
+            var emp = employees[i];
+            var name = emp.fullName || (emp.firstName + ' ' + emp.lastName);
+            html += '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--gray-200);border-radius:8px;cursor:pointer;background:white;">' +
+                '<input type="checkbox" class="emp-chk" value="' + emp.id + '" style="width:16px;height:16px;">' +
+                '<div style="flex:1;">' +
+                    '<div style="font-weight:600;font-size:13px;color:var(--gray-900);">' + escapeHtml(name) + '</div>' +
+                    '<div style="font-size:11px;color:var(--gray-500);">' + escapeHtml(emp.email) + (emp.department ? ' &bull; ' + escapeHtml(emp.department) : '') + '</div>' +
+                '</div>' +
+            '</label>';
+        }
+        html += '</div>';
+        document.getElementById('modalEmployeesList').innerHTML = html;
+    }
+
+    function toggleSelectAllEmps(chk) {
+        var checkboxes = document.querySelectorAll('.emp-chk');
+        checkboxes.forEach(function(c) { c.checked = chk.checked; });
+    }
+
+    function closeAssignEmployeesModal() {
+        document.getElementById('assignEmployeesModal').style.display = 'none';
+        selectedAssignParentId = null;
+    }
+
+    async function submitAssignEmployees() {
+        if (!selectedAssignParentId) return;
+        var checkboxes = document.querySelectorAll('.emp-chk:checked');
+        var selectedEmpIds = Array.from(checkboxes).map(function(c) { return parseInt(c.value); });
+
+        if (!selectedEmpIds.length) {
+            toast('Please select at least one employee', 'warning');
+            return;
+        }
+
+        var btn = document.getElementById('btnSubmitAssignEmployees');
+        var origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Assigning...';
+
+        try {
+            var res = await api('/api/company-admin/compliance/parent/' + selectedAssignParentId + '/assign-employees', {
+                method: 'POST',
+                body: JSON.stringify(selectedEmpIds)
+            });
+
+            if (res && res.success) {
+                toast('Successfully assigned to ' + selectedEmpIds.length + ' employee(s)!', 'success');
+                closeAssignEmployeesModal();
+                loadData();
+            } else {
+                toast((res && res.message) || 'Failed to assign compliance', 'error');
+            }
+        } catch(e) {
+            toast('Error assigning compliance', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
+    }
+
     // ==================== INIT ====================
     document.addEventListener('DOMContentLoaded', function() {
         var userStr = localStorage.getItem('user');
@@ -1492,6 +1521,26 @@
         loadNotifications();
     });
 </script>
+
+<!-- ASSIGN TO EMPLOYEES MODAL -->
+<div id="assignEmployeesModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:16px;width:100%;max-width:500px;padding:24px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--gray-200);padding-bottom:12px;">
+            <div>
+                <h3 style="font-size:16px;font-weight:700;color:var(--gray-900);"><i class="fas fa-user-plus" style="color:var(--primary);margin-right:8px;"></i>Assign to Employees</h3>
+                <div style="font-size:12px;color:var(--gray-500);margin-top:2px;" id="modalParentTitle">Assign Compliance</div>
+            </div>
+            <button onclick="closeAssignEmployeesModal()" style="background:none;border:none;font-size:18px;color:var(--gray-400);cursor:pointer;"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="modalEmployeesList" style="max-height:300px;overflow-y:auto;margin-bottom:20px;">
+            <div style="text-align:center;padding:20px;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading employees...</div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:12px;border-top:1px solid var(--gray-200);padding-top:16px;">
+            <button onclick="closeAssignEmployeesModal()" class="btn btn-ghost">Cancel</button>
+            <button id="btnSubmitAssignEmployees" onclick="submitAssignEmployees()" class="btn btn-primary"><i class="fas fa-check"></i> Assign Compliance</button>
+        </div>
+    </div>
+</div>
 
 </body>
 </html>

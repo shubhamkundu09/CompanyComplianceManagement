@@ -526,7 +526,7 @@
     <nav id="navbar">
         <!-- Logo -->
         <div class="logo">
-            <img src="${baseUrl}/vnextimages/companyfiles/logo.png" alt="VNext Legal">
+            <img src="${baseUrl}/vnextimages/companyfiles/logo.png" alt="VNext Legal" onerror="this.style.display='none'">
         </div>
 
         <!-- Nav Links -->
@@ -560,7 +560,7 @@
     <div class="sidebar-nav" id="sidebarNav">
         <div class="sidebar-header">
             <div class="logo">
-                <img src="${baseUrl}/vnextimages/companyfiles/logo.png" alt="VNext Legal">
+                <img src="${baseUrl}/vnextimages/companyfiles/logo.png" alt="VNext Legal" onerror="this.style.display='none'">
             </div>
             <button class="close-sidebar" id="closeSidebarBtn" aria-label="Close menu">✕</button>
         </div>

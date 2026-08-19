@@ -37,6 +37,9 @@ public class ComplianceConfigDTO {
     private Boolean repeatReminder = true;
     private Integer reminderIntervalDays = 3;
 
+    private Boolean editableForCompanies = false;
+    private Boolean canManage = false;
+
     private String description;
     private String documentRequired;
     private String externalLink;
@@ -44,4 +47,10 @@ public class ComplianceConfigDTO {
     private Boolean isActive = true;
     private Boolean isSuperAdminConfig = false;
     private LocalDateTime createdAt;
+
+    // ===== COMPLETION DETAILS =====
+    private LocalDateTime completedAt;
+    private String completedByName;
+    private String submissionReference;
+    private String submissionDocumentUrl;
 }

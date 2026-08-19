@@ -214,16 +214,8 @@ public class ViewController {
     }
 
     @GetMapping("/company-admin/compliance/custom/create")
-    public String companyAdminCreateCustomCompliance(
-            @RequestParam(required = false) Long parentId,
-            @CurrentUser User admin,
-            Model model) {
-
-        if (parentId != null) {
-            model.addAttribute("parentId", parentId);
-        }
-
-        return "companyadmin/sub-compliance-form";
+    public String companyAdminCreateCustomCompliance() {
+        return "redirect:/company-admin/compliance/parents";
     }
 
     @GetMapping("/company-admin/compliance/list")
@@ -253,7 +245,7 @@ public class ViewController {
 
     @GetMapping("/company-admin/sub-admins")
     public String companyAdminSubAdmins() {
-        return "companyadmin/sub-admins";
+        return "redirect:/company-admin/employees";
     }
 
     // ==================== EMPLOYEE VIEWS ====================
@@ -294,6 +286,11 @@ public class ViewController {
     @GetMapping("/employee/compliance-calendar")
     public String employeeComplianceCalendar() {
         return "employee/compliance-calendar";
+    }
+
+    @GetMapping("/employee/change-password")
+    public String employeeChangePassword() {
+        return "change-password";
     }
 
 

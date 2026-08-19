@@ -32,9 +32,9 @@ public class NotificationController {
         // Save the announcement
         Notification notification = notificationService.createNotification(title, message, admin.getId());
 
-        // Send push AND save to all admins (SuperAdmin + CompanyAdmin)
-        notificationEventService.notifyAllAdminsWithSave(
-                "System Announcement",
+        // Send push notification to all admins (SuperAdmin + CompanyAdmin)
+        notificationEventService.notifyAllAdminsPushOnly(
+                title,
                 message,
                 NotificationType.SYSTEM_ANNOUNCEMENT,
                 "notifications"

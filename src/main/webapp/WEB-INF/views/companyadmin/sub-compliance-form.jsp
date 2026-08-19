@@ -783,13 +783,10 @@
                    <span class="nav-badge" id="employeeCount">0</span>
                </a>
 
-               <div class="sidebar-label">Compliance</div>
-               <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
-                   <i class="fas fa-tasks"></i> My Compliances
-               </a>
-               <a href="${baseUrl}/company-admin/compliance/custom/create" class="nav-item active">
-                   <i class="fas fa-plus-circle"></i> Custom Compliance
-               </a>
+                <div class="sidebar-label">Compliance</div>
+                <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
+                    <i class="fas fa-tasks"></i> My Compliances
+                </a>
 
                <div class="sidebar-label">Communication</div>
                <a href="${baseUrl}/company-admin/notifications" class="nav-item ">
@@ -857,20 +854,20 @@
             <span class="sep"><i class="fas fa-chevron-right" style="font-size:9px;"></i></span>
             <a href="${baseUrl}/company-admin/compliance/parents">My Compliances</a>
             <span class="sep"><i class="fas fa-chevron-right" style="font-size:9px;"></i></span>
-            <span class="current"><%= isEdit ? "Edit Custom Compliance" : "Create Custom Compliance" %></span>
+            <span class="current">Add Sub-Compliance</span>
         </div>
 
         <div class="form-container">
 
             <div style="margin-bottom:24px;">
                 <p style="font-size:12px;color:var(--primary);font-weight:600;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">
-                    <%= isEdit ? "Edit Custom Compliance" : "Create Custom Compliance" %>
+                    Sub-Compliance Management
                 </p>
                 <h1 style="font-size:24px;font-weight:700;color:var(--gray-900);">
-                    <%= isEdit ? "Update Custom Compliance" : "Create New Custom Compliance" %>
+                    Add Sub-Compliance
                 </h1>
                 <p style="font-size:13px;color:var(--gray-500);margin-top:4px;">
-                    <%= isEdit ? "Update your custom compliance details" : "Add a custom compliance for your company" %>
+                    Add a sub-compliance item under an Editable Compliance Category for your company
                 </p>
             </div>
 
@@ -878,31 +875,32 @@
                 <form id="complianceForm" onsubmit="return false;">
 
                     <div style="margin-bottom:16px;">
-                        <label class="form-label">Compliance Name <span class="required">*</span></label>
-                        <input type="text" id="complianceName" class="form-input" placeholder="Enter compliance name" required>
+                        <label class="form-label">Editable Compliance Category <span class="required">*</span></label>
+                        <select id="parentCategorySelect" class="form-input" required>
+                            <option value="">-- Select Editable Compliance Category --</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom:16px;">
+                        <label class="form-label">Sub-Compliance Name <span class="required">*</span></label>
+                        <input type="text" id="complianceName" class="form-input" placeholder="e.g. Monthly GST Return Filing" required>
                     </div>
 
                     <div style="margin-bottom:16px;">
                         <label class="form-label">Description</label>
-                        <textarea id="complianceDescription" class="form-input" rows="4" placeholder="Describe this compliance category..."></textarea>
+                        <textarea id="complianceDescription" class="form-input" rows="3" placeholder="Describe this sub-compliance..."></textarea>
                     </div>
 
-                    <% if (parentId != null && !parentId.isEmpty()) { %>
-                        <div style="margin-bottom:16px;">
-                            <label class="form-label">Parent Compliance</label>
-                            <div style="padding:10px 14px;background:rgba(226,232,240,0.15);border-radius:var(--radius);font-size:13px;color:var(--gray-600);">
-                                <i class="fas fa-folder-open" style="color:var(--primary);margin-right:8px;"></i>
-                                This will be added as a sub-compliance under parent ID: <strong>#<%= parentId %></strong>
-                            </div>
-                            <input type="hidden" id="parentId" value="<%= parentId %>">
-                        </div>
-                    <% } %>
+                    <div style="margin-bottom:16px;">
+                        <label class="form-label">Display Order</label>
+                        <input type="number" id="displayOrder" class="form-input" value="1" min="0" placeholder="0">
+                    </div>
 
                     <div class="info-box">
                         <i class="fas fa-info-circle"></i>
                         <div class="info-text">
-                            <strong>Note:</strong> Custom compliances are only visible to your company.
-                            After creating, you can configure the compliance and assign it to your employees.
+                            <strong>Note:</strong> You can add sub-compliances under categories marked as <strong>Editable Category</strong>.
+                            After adding, you can configure frequency, due dates, and assign tasks to your employees.
                         </div>
                     </div>
 
@@ -913,7 +911,7 @@
                             <i class="fas fa-times"></i> Cancel
                         </a>
                         <button type="submit" id="submitBtn" class="btn btn-primary">
-                            <i class="fas fa-plus"></i> Create Compliance
+                            <i class="fas fa-plus"></i> Save Sub-Compliance
                         </button>
                     </div>
                 </form>
@@ -1114,61 +1112,94 @@
                 }
             } catch(e) {}
         }
+
+        async function loadEditableCategories() {
+            var select = document.getElementById('parentCategorySelect');
+            if (!select) return;
+
+            try {
+                var data = await api('/api/company-admin/compliance/parents');
+                if (data && data.success && data.data) {
+                    var list = data.data || [];
+                    var editableList = list.filter(function(item) {
+                        return item.canManage === true;
+                    });
+
+                    if (editableList.length === 0) {
+                        select.innerHTML = '<option value="">No Editable Categories Available</option>';
+                        toast('No editable compliance categories found. Only categories set as Editable by SuperAdmin support sub-compliances.', 'warning');
+                        return;
+                    }
+
+                    var html = '<option value="">-- Select Editable Compliance Category --</option>';
+                    for (var i = 0; i < editableList.length; i++) {
+                        var cat = editableList[i];
+                        var selected = (parentId && String(cat.templateId) === String(parentId)) ? 'selected' : '';
+                        html += '<option value="' + cat.templateId + '" ' + selected + '>' + escapeHtml(cat.templateName || cat.name) + '</option>';
+                    }
+                    select.innerHTML = html;
+                } else {
+                    select.innerHTML = '<option value="">Failed to load categories</option>';
+                }
+            } catch(e) {
+                console.error('Error loading categories:', e);
+                select.innerHTML = '<option value="">Failed to load categories</option>';
+            }
+        }
+
         loadEmployeeCount();
         loadNotifications();
+        loadEditableCategories();
     });
 
     document.getElementById('complianceForm').addEventListener('submit', async function(e) {
         e.preventDefault();
 
+        var selectedParentId = document.getElementById('parentCategorySelect').value;
         var name = document.getElementById('complianceName').value.trim();
         var description = document.getElementById('complianceDescription').value.trim();
+        var order = parseInt(document.getElementById('displayOrder').value) || 0;
+
+        if (!selectedParentId) {
+            toast('Please select an Editable Compliance Category', 'error');
+            return;
+        }
 
         if (!name) {
-            toast('Please enter a compliance name', 'error');
+            toast('Please enter a sub-compliance name', 'error');
             return;
         }
 
         var btn = document.getElementById('submitBtn');
         var originalText = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
 
         var payload = {
             name: name,
             description: description || null,
-            isCompanySpecific: true
+            displayOrder: order,
+            parentTemplateId: parseInt(selectedParentId)
         };
 
-        var url, method;
-        if (parentId && parentId !== 'null') {
-            // This is a sub-compliance
-            url = '/api/company-admin/compliance/sub-templates?parentId=' + parentId;
-            method = 'POST';
-        } else {
-            // This is a parent custom compliance
-            url = '/api/company-admin/compliance/custom/templates';
-            method = 'POST';
-        }
-
         try {
-            var data = await api(url, {
-                method: method,
+            var data = await api('/api/company-admin/compliance/editable/' + selectedParentId + '/sub-templates', {
+                method: 'POST',
                 body: JSON.stringify(payload)
             });
 
             if (data && data.success) {
-                toast('Custom compliance created successfully!', 'success');
+                toast('Sub-compliance saved successfully!', 'success');
                 setTimeout(function() {
-                    window.location.href = contextPath + '/company-admin/compliance/parents';
-                }, 1500);
+                    window.location.href = contextPath + '/company-admin/compliance/parent/' + selectedParentId;
+                }, 1200);
             } else {
-                toast(data?.error || 'Failed to create compliance', 'error');
+                toast(data?.error || 'Failed to save sub-compliance', 'error');
                 btn.disabled = false;
                 btn.innerHTML = originalText;
             }
         } catch (error) {
-            console.error('Error creating compliance:', error);
+            console.error('Error saving sub-compliance:', error);
             toast('An error occurred. Please try again.', 'error');
             btn.disabled = false;
             btn.innerHTML = originalText;

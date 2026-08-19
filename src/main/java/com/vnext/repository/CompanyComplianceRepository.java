@@ -157,29 +157,24 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
     @Query(value = "SELECT * FROM company_compliances WHERE company_id = :companyId AND sub_template_id = :subTemplateId", nativeQuery = true)
     Optional<CompanyCompliance> findByCompanyIdAndSubTemplateId(@Param("companyId") Long companyId, @Param("subTemplateId") Long subTemplateId);
 
-    // If you have a parent_company_compliance_id column, but it's named differently
-    @Query(value = "SELECT * FROM company_compliances WHERE parent_id = :parentId AND is_parent = false AND is_deleted = false", nativeQuery = true)
+    @Query("SELECT cc FROM CompanyCompliance cc WHERE (cc.parentTemplateId = :parentId OR cc.parentTemplateId = (SELECT p.template.id FROM CompanyCompliance p WHERE p.id = :parentId)) AND cc.isParent = false AND cc.deleted = false")
     List<CompanyCompliance> findByParentCompanyComplianceIdAndIsSubComplianceTrue(@Param("parentId") Long parentId);
 
-
-
-    // ===== FIX: Use JPQL instead of native query =====
     @Query("SELECT cc FROM CompanyCompliance cc WHERE cc.parentTemplateId = :parentId AND cc.isParent = false AND cc.deleted = false")
     List<CompanyCompliance> findSubCompliancesByParentTemplateId(@Param("parentId") Long parentId);
 
-
-    @Query(value = "SELECT COUNT(*) FROM company_compliances WHERE parent_company_compliance_id = :parentId AND is_parent = false", nativeQuery = true)
+    @Query("SELECT COUNT(cc) FROM CompanyCompliance cc WHERE (cc.parentTemplateId = :parentId OR cc.parentTemplateId = (SELECT p.template.id FROM CompanyCompliance p WHERE p.id = :parentId)) AND cc.isParent = false AND cc.deleted = false")
     long countSubCompliancesByParentId(@Param("parentId") Long parentId);
 
-    @Query(value = "SELECT COUNT(*) FROM company_compliances WHERE parent_company_compliance_id = :parentId AND is_parent = false AND status = :status", nativeQuery = true)
-    long countSubCompliancesByParentIdAndStatus(@Param("parentId") Long parentId, @Param("status") String status);
+    @Query("SELECT COUNT(cc) FROM CompanyCompliance cc WHERE (cc.parentTemplateId = :parentId OR cc.parentTemplateId = (SELECT p.template.id FROM CompanyCompliance p WHERE p.id = :parentId)) AND cc.isParent = false AND cc.deleted = false AND cc.status = :status")
+    long countSubCompliancesByParentIdAndStatus(@Param("parentId") Long parentId, @Param("status") ComplianceStatus status);
 
-    @Query(value = "SELECT COUNT(*) FROM company_compliances cc WHERE cc.parent_company_compliance_id = :parentId AND cc.is_parent = false AND EXISTS " +
-            "(SELECT 1 FROM compliance_configs c WHERE c.company_compliance_id = cc.id AND c.is_active = true)", nativeQuery = true)
+    @Query("SELECT COUNT(cc) FROM CompanyCompliance cc WHERE (cc.parentTemplateId = :parentId OR cc.parentTemplateId = (SELECT p.template.id FROM CompanyCompliance p WHERE p.id = :parentId)) AND cc.isParent = false AND cc.deleted = false AND EXISTS " +
+            "(SELECT c FROM ComplianceConfig c WHERE c.companyCompliance.id = cc.id AND c.isActive = true)")
     long countConfiguredSubCompliancesByParentId(@Param("parentId") Long parentId);
 
-    @Query(value = "SELECT COUNT(*) > 0 FROM company_compliances " +
-            "WHERE company_id = :companyId AND template_id = :templateId AND is_parent = true AND is_deleted = false", nativeQuery = true)
+    @Query("SELECT COUNT(cc) > 0 FROM CompanyCompliance cc " +
+            "WHERE cc.company.id = :companyId AND cc.template.id = :templateId AND cc.isParent = true AND cc.deleted = false")
     boolean existsByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(@Param("companyId") Long companyId, @Param("templateId") Long templateId);
 
 
@@ -410,6 +405,16 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "AND cc.parentTemplateId = :templateId AND cc.isParent = false AND cc.deleted = false")
     List<CompanyCompliance> findSubCompliancesByCompanyIdAndParentTemplateId(@Param("companyId") Long companyId,
                                                                              @Param("templateId") Long templateId);
+
+    @Query("SELECT cc FROM CompanyCompliance cc WHERE cc.company.id = :companyId " +
+            "AND cc.parentTemplateId = :templateId")
+    List<CompanyCompliance> findAllSubCompliancesByCompanyIdAndParentTemplateId(@Param("companyId") Long companyId,
+                                                                                @Param("templateId") Long templateId);
+
+    @Query("SELECT DISTINCT cc FROM CompanyCompliance cc WHERE cc.company.id = :companyId " +
+            "AND (cc.template.id = :templateId OR cc.parentTemplateId = :templateId)")
+    List<CompanyCompliance> findAllByCompanyIdAndTemplateOrParentTemplateId(@Param("companyId") Long companyId,
+                                                                           @Param("templateId") Long templateId);
 
 
 

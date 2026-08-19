@@ -868,9 +868,6 @@
         <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
             <i class="fas fa-tasks"></i> My Compliances
         </a>
-        <a href="${baseUrl}/company-admin/compliance/custom/create" class="nav-item">
-            <i class="fas fa-plus-circle"></i> Custom Compliance
-        </a>
 
         <div class="sidebar-label">Communication</div>
         <a href="${baseUrl}/company-admin/notifications" class="nav-item active">

@@ -2154,7 +2154,6 @@
 
        if (data && data.success) {
            var allAssignments = data.data.content || [];
-
            var groupedByTemplate = {};
            for (var i = 0; i < allAssignments.length; i++) {
                var a = allAssignments[i];
@@ -2172,6 +2171,15 @@
                        subCompliances: [],
                        companyComplianceId: a.id
                    };
+               }
+
+               if (a.isParent) {
+                   groupedByTemplate[templateId].companyComplianceId = a.id;
+                   groupedByTemplate[templateId].templateName = a.templateName || groupedByTemplate[templateId].templateName;
+                   groupedByTemplate[templateId].isActive = a.isActive;
+                   groupedByTemplate[templateId].configured = a.configured;
+                   groupedByTemplate[templateId].assignedAt = a.assignedAt;
+                   groupedByTemplate[templateId].status = a.status || groupedByTemplate[templateId].status;
                }
 
                if (a.subTemplateName) {
@@ -2336,7 +2344,7 @@
         if (!pendingRemoveId) return;
 
         // Find the templateId and companyId from the pending remove
-        var assignment = assignedCompliances.find(c => c.companyComplianceId === pendingRemoveId);
+        var assignment = assignedCompliances.find(function(c) { return c.companyComplianceId === pendingRemoveId; });
         if (!assignment) {
             toast('Assignment not found', 'error');
             return;
@@ -2345,31 +2353,29 @@
         var templateId = assignment.templateId;
         var companyId = parseInt(CID);
 
-        if (!confirm('⚠️ PERMANENT DELETE: This will delete all configurations, assignments, documents, and history for "' +
-                     assignment.templateName + '" from this company. This cannot be undone! Continue?')) {
-            return;
-        }
-
         var btn = document.querySelector('#confirmRemoveModal .btn-danger');
-        var originalText = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+        var originalText = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Removing...';
+        }
 
         var data = await api('/api/super-admin/compliance/companies/' + companyId + '/templates/' + templateId, {
             method: 'DELETE'
         });
 
-        btn.disabled = false;
-        btn.innerHTML = originalText;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
 
         if (data && data.success) {
-            toast('Compliance permanently removed from company', 'success');
+            toast('Category permanently removed from company', 'success');
             closeConfirmRemoveModal();
             loadAssignedCompliances();
-            // Also refresh the company data to update counts
             loadCompany();
         } else {
-            toast(data?.error || 'Failed to remove compliance', 'error');
+            toast((data && data.error) || 'Failed to remove category', 'error');
         }
     }
 
@@ -2377,18 +2383,6 @@
         pendingRemoveId = null;
         document.getElementById('confirmRemoveModal').style.display = 'none';
         document.body.style.overflow = '';
-    }
-
-    async function confirmRemoveCompliance() {
-        if (!pendingRemoveId) return;
-        var data = await api('/api/super-admin/compliance/assignments/' + pendingRemoveId, { method: 'DELETE' });
-        if (data && data.success) {
-            toast('Compliance removed successfully', 'success');
-            closeConfirmRemoveModal();
-            loadAssignedCompliances();
-        } else {
-            toast(data?.error || 'Failed to remove compliance', 'error');
-        }
     }
 
     // ==================== ASSIGN COMPLIANCE MODAL ====================

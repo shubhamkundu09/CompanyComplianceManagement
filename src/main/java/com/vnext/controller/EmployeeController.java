@@ -28,6 +28,7 @@ public class EmployeeController {
     private final EmployeeService employeeService;
     private final AssignmentService assignmentService;
     private final PasswordService passwordService;
+    private final com.vnext.service.DocumentStorageService documentStorageService;
 
     // ==================== PROFILE ====================
 
@@ -125,8 +126,7 @@ public class EmployeeController {
 
         String documentUrl = null;
         if (document != null && !document.isEmpty()) {
-            // Store document and get URL
-            // documentUrl = documentStorageService.store(document, "compliance_submission");
+            documentUrl = documentStorageService.store(document, "compliance_submission");
         }
 
         assignmentService.markAsCompleted(assignmentId, employee.getId(), submissionReference, documentUrl);

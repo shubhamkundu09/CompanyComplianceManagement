@@ -36,4 +36,5 @@ public class CompanyComplianceDTO {
 
     // ===== ADD PRIORITY FIELD =====
     private Integer priority;
+    private Boolean isParent;
 }

@@ -12,11 +12,12 @@ import java.util.List;
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
 
-    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) ORDER BY n.id DESC")
+    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.notificationType = 'SYSTEM_ANNOUNCEMENT' OR n.notificationType = 'ANNOUNCEMENT' OR n.notificationType = 'GENERAL') ORDER BY n.id DESC")
     List<Notification> findActiveNotifications(@Param("now") LocalDateTime now);
 
-    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.targetRole IS NULL OR n.targetRole = :role) ORDER BY n.id DESC")
+    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.targetRole IS NULL OR n.targetRole = :role) AND (n.notificationType = 'SYSTEM_ANNOUNCEMENT' OR n.notificationType = 'ANNOUNCEMENT' OR n.notificationType = 'GENERAL') ORDER BY n.id DESC")
     List<Notification> findActiveNotificationsForRole(@Param("now") LocalDateTime now, @Param("role") String role);
 
-    long countByIsActiveTrueAndExpiresAtIsNullOrExpiresAtAfter(LocalDateTime now);
+    @Query("SELECT COUNT(n) FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.notificationType = 'SYSTEM_ANNOUNCEMENT' OR n.notificationType = 'ANNOUNCEMENT' OR n.notificationType = 'GENERAL')")
+    long countActiveAnnouncementNotifications(@Param("now") LocalDateTime now);
 }

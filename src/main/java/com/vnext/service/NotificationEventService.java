@@ -66,6 +66,12 @@ public class NotificationEventService {
         notifyUsersWithSave(userIds, title, body, type, screen, null);
     }
 
+    public void notifyAllAdminsPushOnly(String title, String body, NotificationType type, String screen) {
+        var userIds = userRepository.findAllByRoleInAndDeletedFalse(List.of(UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN))
+                .stream().map(User::getId).collect(Collectors.toList());
+        notifyUsersPushOnly(userIds, title, body, type, screen);
+    }
+
     // ─── PUSH ONLY (for business events) ─────────────────────────────────────
 
     public void notifyUsersPushOnly(List<Long> userIds, String title, String body, NotificationType type, String screen) {

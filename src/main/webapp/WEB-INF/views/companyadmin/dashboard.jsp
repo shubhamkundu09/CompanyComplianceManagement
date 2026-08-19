@@ -1830,9 +1830,6 @@ pageEncoding="UTF-8" %> <% pageContext.setAttribute("pageTitle", "Dashboard" );
               <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
                   <i class="fas fa-tasks"></i> My Compliances
               </a>
-              <a href="${baseUrl}/company-admin/compliance/custom/create" class="nav-item">
-                  <i class="fas fa-plus-circle"></i> Custom Compliance
-              </a>
 
               <div class="sidebar-label">Communication</div>
               <a href="${baseUrl}/company-admin/notifications" class="nav-item">
@@ -2107,15 +2104,8 @@ pageEncoding="UTF-8" %> <% pageContext.setAttribute("pageTitle", "Dashboard" );
                     margin-top: 6px;
                   "
                 >
-                  SuperAdmin will assign categories, or you can create your own
-                  custom compliances.
+                  SuperAdmin will assign compliance categories for your company.
                 </p>
-                <a
-                  href="${baseUrl}/company-admin/compliance/custom/create"
-                  class="btn btn-primary"
-                  style="margin-top: 12px"
-                  ><i class="fas fa-plus"></i> Create Custom Compliance</a
-                >
               </div>
             </div>
             <div id="tab-overdue" class="tab-pane">

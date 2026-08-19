@@ -624,6 +624,7 @@
                 const data = await response.json();
 
                 if (response.ok && data.success) {
+                    localStorage.setItem('token', data.data.accessToken);
                     localStorage.setItem('accessToken', data.data.accessToken);
                     localStorage.setItem('user', JSON.stringify(data.data.user));
                     document.cookie = "accessToken=" + data.data.accessToken + "; path=/";

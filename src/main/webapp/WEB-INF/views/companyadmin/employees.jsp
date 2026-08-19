@@ -1124,9 +1124,6 @@
            <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
                <i class="fas fa-tasks"></i> My Compliances
            </a>
-           <a href="${baseUrl}/company-admin/compliance/custom/create" class="nav-item">
-               <i class="fas fa-plus-circle"></i> Custom Compliance
-           </a>
 
            <div class="sidebar-label">Communication</div>
            <a href="${baseUrl}/company-admin/notifications" class="nav-item ">
@@ -1402,6 +1399,34 @@
     </div>
 </div>
 
+<!-- ==================== ASSIGN PARENT COMPLIANCES MODAL ==================== -->
+<div id="assignCompliancesModal" class="modal-overlay">
+    <div class="modal-box medium">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title"><i class="fas fa-tasks" style="color:var(--primary);margin-right:8px;"></i>Assign Parent Compliances</div>
+                <div class="modal-subtitle">Assign compliances to <strong id="assignEmployeeName">Employee</strong></div>
+            </div>
+            <button class="modal-close" onclick="closeAssignCompliancesModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div id="assignCompliancesList">
+                <div style="text-align:center;padding:20px;color:var(--gray-500);">
+                    <i class="fas fa-spinner fa-spin" style="font-size:24px;"></i><br><br>Loading parent compliances...
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeAssignCompliancesModal()" class="btn btn-ghost">Cancel</button>
+            <button id="btnSubmitAssign" onclick="submitAssignCompliances()" class="btn btn-primary">
+                <i class="fas fa-check"></i> Assign Compliances
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
     var contextPath = '${baseUrl}';
     var currentPage = 0;
@@ -1409,6 +1434,134 @@
     var pendingDeleteId = null;
     var pendingResetId = null;
     var currentViewEmployeeId = null;
+    var assignEmployeeId = null;
+
+    var currentlyAssignedCount = 0;
+
+    async function openAssignCompliancesModal(empId, empName) {
+        assignEmployeeId = empId;
+        document.getElementById('assignEmployeeName').textContent = empName;
+        document.getElementById('assignCompliancesList').innerHTML = '<div style="text-align:center;padding:20px;color:var(--gray-500);"><i class="fas fa-spinner fa-spin" style="font-size:24px;"></i><br><br>Loading compliances...</div>';
+        document.getElementById('assignCompliancesModal').classList.add('active');
+
+        try {
+            // Load all parent compliances AND currently assigned IDs simultaneously
+            var [parentsRes, assignedRes] = await Promise.all([
+                api('/api/company-admin/compliance/parents'),
+                api('/api/company-admin/employees/' + empId + '/assigned-parent-ids')
+            ]);
+
+            var compliances = (parentsRes && parentsRes.data) ? (Array.isArray(parentsRes.data) ? parentsRes.data : (parentsRes.data.content || [])) : [];
+            var assignedSet = new Set((assignedRes && assignedRes.data) ? (Array.isArray(assignedRes.data) ? assignedRes.data : []) : []);
+
+            renderAssignCompliancesList(compliances, assignedSet);
+        } catch(e) {
+            console.error('Error loading compliances for assignment:', e);
+            document.getElementById('assignCompliancesList').innerHTML = '<div style="color:var(--danger);padding:15px;text-align:center;">Failed to load company compliances.</div>';
+        }
+    }
+
+    function renderAssignCompliancesList(list, assignedSet) {
+        if (!list || !list.length) {
+            document.getElementById('assignCompliancesList').innerHTML = '<div style="padding:20px;color:var(--gray-500);text-align:center;">No active parent compliances found for your company.</div>';
+            return;
+        }
+
+        assignedSet = assignedSet || new Set();
+        var checkedCount = 0;
+
+        var html = '<div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">' +
+            '<label style="font-size:12px;font-weight:600;cursor:pointer;color:var(--gray-700);"><input type="checkbox" id="selectAllCompliances" onchange="toggleSelectAllCompliances(this)" style="margin-right:6px;"> Select All (' + list.length + ' Compliances)</label>' +
+            '<span style="font-size:11px;color:var(--gray-500);"><i class="fas fa-info-circle"></i> Check to assign, uncheck to remove</span>' +
+        '</div><div style="max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;">';
+
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i];
+            var title = item.templateName || (item.template ? item.template.name : 'Compliance #' + item.id);
+            var desc = item.templateDescription || item.description || '';
+            var subsCount = item.totalSubCompliances !== undefined ? item.totalSubCompliances : 0;
+            var isAssigned = assignedSet.has(item.id) || (item.templateId && assignedSet.has(item.templateId));
+            if (isAssigned) checkedCount++;
+
+            var typeBadge = item.canManage === true
+                ? '<span style="background:rgba(245,158,11,0.12);color:var(--warning);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-edit"></i> Editable</span>'
+                : '<span style="background:rgba(79,70,229,0.1);color:var(--primary);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-lock"></i> Admin Managed</span>';
+
+            var subBadge = subsCount > 0 
+                ? '<span style="background:rgba(30,58,138,0.08);color:var(--primary);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-list"></i> ' + subsCount + ' Sub-Compliances</span>'
+                : '<span style="background:rgba(100,116,139,0.08);color:var(--gray-600);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;">Standalone</span>';
+
+            var assignedBadge = isAssigned
+                ? '<span style="background:rgba(16,185,129,0.15);color:var(--success);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-check-circle"></i> Currently Assigned</span>'
+                : '';
+
+            var itemBg = isAssigned ? 'background:rgba(238,242,255,0.6);border-color:var(--primary-light);' : 'background:white;';
+
+            html += '<label style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--gray-200);border-radius:10px;cursor:pointer;' + itemBg + 'transition:all 0.2s ease;">' +
+                '<input type="checkbox" class="compliance-chk" value="' + item.id + '" ' + (isAssigned ? 'checked' : '') + ' style="width:16px;height:16px;cursor:pointer;">' +
+                '<div style="flex:1;">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
+                        '<span style="font-weight:600;font-size:13px;color:var(--gray-900);">' + escapeHtml(title) + '</span>' +
+                        '<div style="display:flex;gap:6px;align-items:center;">' +
+                            assignedBadge +
+                            typeBadge +
+                            subBadge +
+                        '</div>' +
+                    '</div>' +
+                    (desc ? '<div style="font-size:11px;color:var(--gray-500);margin-top:3px;">' + escapeHtml(desc) + '</div>' : '') +
+                '</div>' +
+            '</label>';
+        }
+        html += '</div>';
+        document.getElementById('assignCompliancesList').innerHTML = html;
+
+        var selectAllChk = document.getElementById('selectAllCompliances');
+        if (selectAllChk && list.length > 0) {
+            selectAllChk.checked = (checkedCount === list.length);
+        }
+    }
+
+    function toggleSelectAllCompliances(chk) {
+        var checkboxes = document.querySelectorAll('.compliance-chk');
+        checkboxes.forEach(function(c) { c.checked = chk.checked; });
+    }
+
+    function closeAssignCompliancesModal() {
+        document.getElementById('assignCompliancesModal').classList.remove('active');
+        assignEmployeeId = null;
+    }
+
+    async function submitAssignCompliances() {
+        if (!assignEmployeeId) return;
+        var checkboxes = document.querySelectorAll('.compliance-chk:checked');
+        var selectedIds = Array.from(checkboxes).map(function(c) { return parseInt(c.value); });
+
+        var btn = document.getElementById('btnSubmitAssign');
+        var originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+
+        try {
+            var res = await api('/api/company-admin/employees/' + assignEmployeeId + '/assign-parent-compliances', {
+                method: 'POST',
+                body: JSON.stringify(selectedIds)
+            });
+
+            if (res && res.success) {
+                toast('Compliance assignments updated successfully (' + selectedIds.length + ' assigned)!', 'success');
+                closeAssignCompliancesModal();
+                loadEmployees();
+            } else {
+                toast((res && res.message) || (res && res.error) || 'Failed to update compliance assignments', 'error');
+            }
+        } catch(e) {
+            console.error('Error updating compliances:', e);
+            toast('Error updating compliance assignments', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
 
     // ==================== TOAST ====================
     function toast(message, type = 'info', duration = 3500) {
@@ -1706,6 +1859,9 @@
                 '<td style="font-size:12px;color:var(--gray-500);">' + formatDate(emp.createdAt) + '</td>' +
                 '<td style="text-align:center;">' +
                     '<div style="display:flex;gap:4px;justify-content:center;">' +
+                        '<button onclick="openAssignCompliancesModal(' + emp.id + ', \'' + escapeHtml(fullName) + '\')" class="btn btn-primary" style="padding:5px 8px;" title="Assign Parent Compliances">' +
+                            '<i class="fas fa-tasks" style="font-size:12px;"></i>' +
+                        '</button>' +
                         '<a href="' + contextPath + '/company-admin/employees/' + emp.id + '" class="btn btn-ghost" style="padding:5px 8px;" title="View">' +
                             '<i class="fas fa-eye" style="font-size:12px;"></i>' +
                         '</a>' +
@@ -1856,19 +2012,19 @@
             return;
         }
 
-        // Group by parent compliance
+        // Group by parent compliance category
         var grouped = {};
         for (var i = 0; i < compliances.length; i++) {
             var c = compliances[i];
-            var parentId = c.companyComplianceId || c.parentId || 'unknown';
-            if (!grouped[parentId]) {
-                grouped[parentId] = {
-                    name: c.complianceName || 'Compliance',
-                    companyComplianceId: parentId,
+            var parentKey = c.category || c.complianceName || 'General Compliance';
+            if (!grouped[parentKey]) {
+                grouped[parentKey] = {
+                    name: parentKey,
+                    companyComplianceId: c.companyComplianceId || c.templateId,
                     subCompliances: []
                 };
             }
-            grouped[parentId].subCompliances.push(c);
+            grouped[parentKey].subCompliances.push(c);
         }
 
         var html = '<div style="display:flex;flex-direction:column;gap:16px;">';
@@ -1897,12 +2053,17 @@
                         '<div style="font-weight:700;font-size:15px;color:var(--gray-800);">' + escapeHtml(group.name) + '</div>' +
                         '<div style="font-size:11px;color:var(--gray-500);">' + total + ' sub-compliance(s)</div>' +
                     '</div>' +
-                    '<span class="compliance-badge ' + statusClass + '">' +
-                        '<i class="fas ' + overallIcon + '"></i> ' +
-                        (overallStatus === 'COMPLETED' ? 'Completed' :
-                         (overallStatus === 'OVERDUE' ? 'Overdue' :
-                         (overallStatus === 'IN_PROGRESS' ? 'In Progress' : 'Pending'))) +
-                    '</span>' +
+                    '<div style="display:flex;align-items:center;gap:8px;">' +
+                        '<span class="compliance-badge ' + statusClass + '">' +
+                            '<i class="fas ' + overallIcon + '"></i> ' +
+                            (overallStatus === 'COMPLETED' ? 'Completed' :
+                             (overallStatus === 'OVERDUE' ? 'Overdue' :
+                             (overallStatus === 'IN_PROGRESS' ? 'In Progress' : 'Pending'))) +
+                        '</span>' +
+                        '<button onclick="removeComplianceFromEmployeeInModal(' + currentViewEmployeeId + ', ' + (group.companyComplianceId || 'null') + ', \'' + escapeHtml(group.name) + '\')" class="btn btn-danger" style="padding:4px 8px;font-size:11px;border-radius:6px;" title="Remove this compliance from employee">' +
+                            '<i class="fas fa-trash-alt"></i> Remove' +
+                        '</button>' +
+                    '</div>' +
                 '</div>' +
                 '<div style="height:4px;background:rgba(226,232,240,0.5);border-radius:2px;overflow:hidden;margin-bottom:12px;">' +
                     '<div style="height:100%;width:' + pct + '%;background:var(--primary);border-radius:2px;transition:width 0.3s;"></div>' +
@@ -1947,6 +2108,32 @@
         modalBody.innerHTML = html;
     }
 
+    async function removeComplianceFromEmployeeInModal(empId, complianceId, complianceName) {
+        if (!confirm('Are you sure you want to remove "' + complianceName + '" (and all associated sub-compliances) from this employee?')) {
+            return;
+        }
+
+        try {
+            var res = await api('/api/company-admin/employees/' + empId + '/compliances/' + complianceId, {
+                method: 'DELETE'
+            });
+
+            if (res && res.success) {
+                toast('Successfully removed "' + complianceName + '" from employee', 'success');
+                // Reload modal content
+                var empName = document.getElementById('modalEmployeeName').textContent;
+                var empEmail = document.getElementById('modalEmployeeEmail').textContent;
+                viewEmployeeCompliances(empId, empName, empEmail);
+                loadEmployees();
+            } else {
+                toast((res && res.message) || (res && res.error) || 'Failed to remove compliance', 'error');
+            }
+        } catch(e) {
+            console.error('Error removing compliance:', e);
+            toast('Error removing compliance', 'error');
+        }
+    }
+
     function closeComplianceModal() {
         document.getElementById('complianceModal').style.display = 'none';
         document.body.style.overflow = '';
@@ -1964,6 +2151,10 @@
 
     document.getElementById('complianceModal').addEventListener('click', function(e) {
         if (e.target === this) closeComplianceModal();
+    });
+
+    document.getElementById('assignCompliancesModal').addEventListener('click', function(e) {
+        if (e.target === this) closeAssignCompliancesModal();
     });
 
     // ==================== EVENT LISTENERS ====================

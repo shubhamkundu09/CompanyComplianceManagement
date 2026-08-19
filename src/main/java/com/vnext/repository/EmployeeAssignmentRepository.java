@@ -43,6 +43,8 @@ public interface EmployeeAssignmentRepository extends JpaRepository<EmployeeAssi
     // Parent-child relationships
     List<EmployeeAssignment> findByParentAssignmentIdAndIsActiveTrue(Long parentAssignmentId);
 
+    boolean existsByParentAssignmentIdAndIsActiveTrue(Long parentAssignmentId);
+
     boolean existsByParentAssignmentIdAndCompletedAtIsNotNull(Long parentAssignmentId);
 
     // Due date queries

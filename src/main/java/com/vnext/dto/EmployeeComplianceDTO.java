@@ -33,8 +33,12 @@ public class EmployeeComplianceDTO {
     private Boolean isSubAssignment;
 
     private LocalDateTime completedAt;
+    private Long completedBy;
+    private String completedByName;
+    private String completedByRole;
     private String submissionReference;
     private String submissionDocumentUrl;
+    private Boolean canEditCompletion;
 
     private Long employeeId;
     private String employeeName;

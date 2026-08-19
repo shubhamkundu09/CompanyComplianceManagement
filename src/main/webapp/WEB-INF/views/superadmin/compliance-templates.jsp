@@ -1637,21 +1637,33 @@
                     </label>
                     <input type="number" id="priority" class="form-input" value="0" min="0" step="1">
                 </div>
-                <!-- ===== NEW: Editable by Companies Checkbox ===== -->
+                <!-- ===== Compliance Type Selection ===== -->
                 <div style="margin-bottom:16px;">
                     <label class="form-label">
-                        <i class="fas fa-edit" style="margin-right:6px;"></i>
-                        Editable by Companies
+                        <i class="fas fa-layer-group" style="margin-right:6px;"></i>
+                        Compliance Type <span style="color:var(--danger);">*</span>
+                        <span id="typeLockNote" style="font-size:11px;color:var(--danger);font-weight:600;margin-left:8px;display:none;">(Locked - Type cannot be changed after creation)</span>
                     </label>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <input type="checkbox" id="editableForCompanies" class="form-input" style="width:auto;height:18px;width:18px;">
-                        <span style="font-size:12px;color:var(--gray-500);">
-                            If checked, companies can add their own sub‑compliances under this category.
-                        </span>
+                    <div style="display:flex;flex-direction:column;gap:10px;background:var(--gray-50);padding:14px;border-radius:var(--radius);border:1px solid var(--gray-200);">
+                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                            <input type="radio" name="complianceTypeRadio" id="typeNonEditable" value="false" checked style="margin-top:3px;accent-color:var(--primary);">
+                            <div>
+                                <strong style="font-size:13px;color:var(--gray-900);"><i class="fas fa-lock" style="color:var(--primary);margin-right:4px;"></i> Non-Editable Compliance (Admin Managed)</strong>
+                                <p style="font-size:12px;color:var(--gray-500);margin-top:2px;">SuperAdmin creates, configures, and manages all sub-compliances centrally for all companies.</p>
+                            </div>
+                        </label>
+                        <hr style="border:0;border-top:1px solid var(--gray-200);margin:2px 0;">
+                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                            <input type="radio" name="complianceTypeRadio" id="typeEditable" value="true" style="margin-top:3px;accent-color:var(--warning);">
+                            <div>
+                                <strong style="font-size:13px;color:var(--gray-900);"><i class="fas fa-edit" style="color:var(--warning);margin-right:4px;"></i> Editable Compliance (Company Managed)</strong>
+                                <p style="font-size:12px;color:var(--gray-500);margin-top:2px;">SuperAdmin creates the category, but companies add, configure, and manage their own sub-compliances.</p>
+                            </div>
+                        </label>
                     </div>
                 </div>
-                <div class="modal-info-box">
-                    <i class="fas fa-info-circle"></i> After creating, you can add sub-compliances and configure them.
+                <div class="modal-info-box" id="modalInfoBox">
+                    <i class="fas fa-info-circle"></i> Non-Editable Compliance allows SuperAdmin to create, configure, and manage all sub-compliances centrally.
                 </div>
             </form>
         </div>
@@ -2151,6 +2163,11 @@
           // Get the icon based on the template name
           var iconClass = getComplianceIcon(t.name);
 
+          var isEditable = t.editableForCompanies === true;
+          var typeBadge = isEditable
+              ? '<span class="badge badge-warning" style="background:rgba(245,158,11,0.12);color:#d97706;border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
+              : '<span class="badge badge-primary" style="background:rgba(79,70,229,0.12);color:var(--primary);border:1px solid rgba(79,70,229,0.3);"><i class="fas fa-lock"></i> Non-Editable Category</span>';
+
           return (
               '<div class="' + cardClass + '">' +
               '<div class="card-header">' +
@@ -2159,6 +2176,7 @@
               '<h3>' + escapeHtml(t.name) + '</h3>' +
               '</div>' +
               '<div class="card-badges">' +
+              typeBadge +
               statusBadge +
               configBadge +
               subBadge +
@@ -2185,8 +2203,6 @@
           );
       }
 
-
-
        function editPriority(templateId, currentPriority) {
            var newPriority = prompt('Enter priority number (lower number = higher priority, appears first):', currentPriority);
            if (newPriority !== null && newPriority !== '') {
@@ -2201,9 +2217,8 @@
 
       async function updatePriority(templateId, priority) {
           try {
-              // ===== FIX: Use PATCH method =====
               var data = await api('/api/super-admin/compliance/templates/' + templateId + '/priority?priority=' + priority, {
-                  method: 'PATCH'  // <-- Changed from 'PUT' to 'PATCH'
+                  method: 'PATCH'
               });
               if (data && data.success) {
                   toast('Priority updated successfully to ' + priority, 'success');
@@ -2217,7 +2232,6 @@
           }
       }
 
-
     // ==================== PAGINATION ====================
    function renderPagination(totalPages, currentPageNum, totalElements) {
        var container = document.getElementById('pagination');
@@ -2227,24 +2241,18 @@
        }
 
        var html = '';
-       // First page button
        html += '<button class="page-btn" onclick="goPage(0)" ' + (currentPageNum === 0 ? 'disabled' : '') + '><i class="fas fa-angle-double-left"></i></button>';
-       // Previous page button
        html += '<button class="page-btn" onclick="goPage(' + (currentPageNum - 1) + ')" ' + (currentPageNum === 0 ? 'disabled' : '') + '><i class="fas fa-chevron-left"></i></button>';
 
-       // Page numbers
        var start = Math.max(0, currentPageNum - 2);
        var end = Math.min(totalPages - 1, currentPageNum + 2);
        for (var i = start; i <= end; i++) {
            html += '<button class="page-btn ' + (i === currentPageNum ? 'active' : '') + '" onclick="goPage(' + i + ')">' + (i + 1) + '</button>';
        }
 
-       // Next page button
        html += '<button class="page-btn" onclick="goPage(' + (currentPageNum + 1) + ')" ' + (currentPageNum >= totalPages - 1 ? 'disabled' : '') + '><i class="fas fa-chevron-right"></i></button>';
-       // Last page button
        html += '<button class="page-btn" onclick="goPage(' + (totalPages - 1) + ')" ' + (currentPageNum >= totalPages - 1 ? 'disabled' : '') + '><i class="fas fa-angle-double-right"></i></button>';
 
-       // Add info text
        html += '<span style="margin-left:12px;font-size:12px;color:var(--gray-500);">' + (currentPageNum * pageSize + 1) + ' - ' + Math.min((currentPageNum + 1) * pageSize, totalElements) + ' of ' + totalElements + '</span>';
 
        container.innerHTML = html;
@@ -2254,7 +2262,6 @@
     function goPage(page) {
         currentPage = page;
         loadTemplates();
-        // Scroll to top of grid
         document.getElementById('templatesGrid').scrollIntoView({ behavior: 'smooth' });
     }
 
@@ -2265,6 +2272,10 @@
         document.getElementById('modalTitle').innerHTML = '<i class="fas fa-plus-circle" style="color:var(--primary);margin-right:8px;"></i>Create Category';
         document.getElementById('modalSubtitle').textContent = 'Add a new compliance category';
         document.getElementById('templateForm').reset();
+        document.getElementById('typeNonEditable').checked = true;
+        document.getElementById('typeNonEditable').disabled = false;
+        document.getElementById('typeEditable').disabled = false;
+        document.getElementById('typeLockNote').style.display = 'none';
         document.getElementById('templateModal').style.display = 'flex';
         document.body.style.overflow = 'hidden';
     }
@@ -2281,8 +2292,14 @@
            var t = data.data;
            document.getElementById('name').value = t.name;
            document.getElementById('description').value = t.description || '';
-           // ===== FIX: Load priority =====
-            document.getElementById('editableForCompanies').checked = data.data.editableForCompanies === true;
+           if (t.editableForCompanies === true) {
+               document.getElementById('typeEditable').checked = true;
+           } else {
+               document.getElementById('typeNonEditable').checked = true;
+           }
+           document.getElementById('typeNonEditable').disabled = true;
+           document.getElementById('typeEditable').disabled = true;
+           document.getElementById('typeLockNote').style.display = 'inline';
            document.getElementById('priority').value = t.priority || 0;
            document.getElementById('modalTitle').innerHTML = '<i class="fas fa-edit" style="color:var(--primary);margin-right:8px;"></i>Edit Category';
            document.getElementById('modalSubtitle').textContent = 'Update compliance category details';
@@ -2303,12 +2320,13 @@
              return;
          }
 
+         var isEditable = document.getElementById('typeEditable').checked;
+
          var payload = {
                      name: name,
                      description: description,
                      priority: priority,
-                     // NEW: include editableForCompanies
-                     editableForCompanies: document.getElementById('editableForCompanies').checked
+                     editableForCompanies: isEditable
                  };
 
          var btn = document.getElementById('saveBtn');

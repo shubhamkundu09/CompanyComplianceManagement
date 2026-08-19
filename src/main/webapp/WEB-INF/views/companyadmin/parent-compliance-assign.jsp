@@ -1087,9 +1087,6 @@
              <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item active">
                  <i class="fas fa-tasks"></i> My Compliances
              </a>
-             <a href="${baseUrl}/company-admin/compliance/custom/create" class="nav-item">
-                 <i class="fas fa-plus-circle"></i> Custom Compliance
-             </a>
 
              <div class="sidebar-label">Communication</div>
              <a href="${baseUrl}/company-admin/notifications" class="nav-item ">
@@ -1421,6 +1418,8 @@
         }
     });
 
+    var originallyAssignedEmployees = new Set();
+
     // ==================== LOAD DATA ====================
     async function loadData() {
         if (!PARENT_ID || PARENT_ID === 'null' || PARENT_ID === '') {
@@ -1429,85 +1428,69 @@
         }
 
         try {
-            // Load compliance data
-            var allData = await api('/api/company-admin/compliance/assigned');
-            if (allData && allData.success) {
-                var allCompliances = allData.data || [];
-                var parentIdNum = parseInt(PARENT_ID);
+            // Load compliance details, employees, and assigned employee IDs simultaneously
+            var [detailsRes, empRes, assignedRes] = await Promise.all([
+                api('/api/company-admin/compliance/parent/' + PARENT_ID + '/details'),
+                api('/api/company-admin/employees?page=0&size=1000'),
+                api('/api/company-admin/compliance/parent/' + PARENT_ID + '/assigned-employee-ids')
+            ]);
 
-                // Find parent entry by ID, companyComplianceId, or templateId
-                var parentEntry = allCompliances.find(function(c) {
-                    return c.id === parentIdNum && c.subTemplateId === null;
-                });
+            if (detailsRes && detailsRes.success && detailsRes.data) {
+                var p = detailsRes.data;
+                parentData = {
+                    id: p.id,
+                    templateName: p.templateName || 'Compliance',
+                    companyComplianceId: p.id,
+                    templateId: p.templateId
+                };
 
-                if (!parentEntry) {
-                    parentEntry = allCompliances.find(function(c) {
-                        return c.companyComplianceId === parentIdNum && c.subTemplateId === null;
-                    });
-                }
-
-                if (!parentEntry) {
-                    parentEntry = allCompliances.find(function(c) {
-                        return c.templateId === parentIdNum && c.subTemplateId === null;
-                    });
-                }
-
-                var templateId = parentEntry ? parentEntry.templateId : parentIdNum;
-
-                var subCompliancesList = allCompliances.filter(function(c) {
-                    return c.templateId === templateId && c.subTemplateId !== null;
-                });
-
-                if (parentEntry) {
-                    parentData = {
-                        id: parentEntry.id,
-                        templateName: parentEntry.templateName || 'Compliance',
-                        companyComplianceId: parentEntry.companyComplianceId || parentEntry.id,
-                        templateId: parentEntry.templateId
+                subCompliances = (p.subCompliances || []).map(function(s) {
+                    return {
+                        id: s.id,
+                        subTemplateId: s.subTemplateId,
+                        subTemplateName: s.name || 'Sub-Compliance',
+                        isActive: s.isActive,
+                        configured: s.isConfigured !== false,
+                        frequency: s.frequency,
+                        dueDate: s.dueDate,
+                        status: s.status || 'PENDING'
                     };
+                });
 
-                    subCompliances = subCompliancesList.map(function(s) {
-                        return {
-                            id: s.id,
-                            subTemplateId: s.subTemplateId,
-                            subTemplateName: s.subTemplateName || 'Sub-Compliance',
-                            isActive: s.isActive,
-                            configured: s.configured !== false,
-                            frequency: s.frequency,
-                            dueDate: s.dueDate,
-                            status: s.status || 'PENDING'
-                        };
-                    });
+                document.getElementById('complianceName').textContent = parentData.templateName;
 
-                    document.getElementById('complianceName').textContent = parentData.templateName;
-
-                    // Render sub-compliances summary
-                    if (subCompliances.length > 0) {
-                        document.getElementById('subSummaryCard').style.display = 'block';
-                        var subHtml = '';
-                        for (var i = 0; i < subCompliances.length; i++) {
-                            var s = subCompliances[i];
-                            var isConfigured = s.configured === true;
-                            subHtml += '<span class="sub-chip">' +
-                                '<span class="chip-icon"><i class="fas ' + (isConfigured ? 'fa-check-circle' : 'fa-clock') + '"></i></span> ' +
-                                escapeHtml(s.subTemplateName) +
-                            '</span>';
-                        }
-                        document.getElementById('subSummary').innerHTML = subHtml;
-                    } else {
-                        document.getElementById('subSummaryCard').style.display = 'none';
+                // Render sub-compliances summary
+                if (subCompliances.length > 0) {
+                    document.getElementById('subSummaryCard').style.display = 'block';
+                    var subHtml = '';
+                    for (var i = 0; i < subCompliances.length; i++) {
+                        var s = subCompliances[i];
+                        subHtml += '<span class="sub-chip">' +
+                            '<span class="chip-icon"><i class="fas fa-check-circle"></i></span> ' +
+                            escapeHtml(s.subTemplateName) +
+                        '</span>';
                     }
+                    document.getElementById('subSummary').innerHTML = subHtml;
                 } else {
-                    toast('Compliance not found', 'error');
-                    document.getElementById('loader').innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i><p>Compliance not found</p></div>';
-                    return;
+                    document.getElementById('subSummaryCard').style.display = 'none';
                 }
+            } else {
+                toast('Compliance not found', 'error');
+                document.getElementById('loader').innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i><p>Compliance not found</p></div>';
+                return;
             }
 
-            // Load employees
-            var empData = await api('/api/company-admin/employees?page=0&size=1000');
-            if (empData && empData.success) {
-                employees = empData.data.content.filter(function(emp) {
+            // Pre-populate assigned employees
+            if (assignedRes && assignedRes.data) {
+                var assignedArray = Array.isArray(assignedRes.data) ? assignedRes.data : [];
+                selectedEmployees = new Set(assignedArray);
+                originallyAssignedEmployees = new Set(assignedArray);
+            }
+
+            // Process employees list
+            if (empRes && empRes.success) {
+                var rawEmps = empRes.data.content || empRes.data || [];
+                employees = rawEmps.filter(function(emp) {
                     return emp.role === 'EMPLOYEE';
                 });
                 renderEmployeesList();
@@ -1536,8 +1519,13 @@
         for (var i = 0; i < employees.length; i++) {
             var emp = employees[i];
             var isSelected = selectedEmployees.has(emp.id);
+            var isOriginallyAssigned = originallyAssignedEmployees.has(emp.id);
             var fullName = emp.fullName || emp.firstName + ' ' + emp.lastName;
             var initials = ((emp.firstName || '')[0] || '') + ((emp.lastName || '')[0] || '');
+
+            var assignedBadge = isOriginallyAssigned
+                ? '<div style="margin-top:4px;"><span style="background:rgba(16,185,129,0.15);color:var(--success);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-check-circle"></i> Currently Assigned</span></div>'
+                : '';
 
             html += '<div class="employee-card ' + (isSelected ? 'selected' : '') + '" onclick="toggleEmployeeCard(' + emp.id + ')">' +
                 '<div class="emp-info">' +
@@ -1546,6 +1534,7 @@
                 '<div class="emp-name">' + escapeHtml(fullName) + '</div>' +
                 '<div class="emp-email">' + escapeHtml(emp.email) + '</div>' +
                 '<div class="emp-designation"><i class="fas fa-briefcase"></i> ' + (emp.designation || 'Employee') + '</div>' +
+                assignedBadge +
                 '</div>' +
                 '</div>' +
                 '<input type="checkbox" class="emp-checkbox" data-id="' + emp.id + '" ' + (isSelected ? 'checked' : '') + ' onchange="toggleEmployee(' + emp.id + ', this.checked)" onclick="event.stopPropagation();">' +
@@ -1605,53 +1594,26 @@
 
     // ==================== SUBMIT ASSIGNMENT ====================
     async function submitAssignment() {
-        if (selectedEmployees.size === 0) {
-            toast('Please select at least one employee', 'error');
-            return;
-        }
-
         // Check for unconfigured sub-compliances
         var unconfiguredSubs = subCompliances.filter(function(s) { return s.configured !== true; });
 
-        if (unconfiguredSubs.length > 0) {
+        if (unconfiguredSubs.length > 0 && selectedEmployees.size > 0) {
             var subNames = unconfiguredSubs.map(function(s) { return s.subTemplateName || 'Sub-Compliance'; }).join(', ');
             if (!confirm('⚠️ Warning: The following sub-compliances are NOT configured: ' + subNames + '\n\nEmployees will not be able to complete these until they are configured.\n\nDo you want to continue?')) {
                 return;
             }
         }
 
-        if (!confirm('Are you sure you want to assign this compliance to ' + selectedEmployees.size + ' employee(s)?\n\nAll sub-compliances will be assigned automatically.')) {
+        if (!confirm('Are you sure you want to update compliance assignments for ' + selectedEmployees.size + ' employee(s)?\n\nAll sub-compliances will be synced automatically.')) {
             return;
         }
 
         var btn = document.getElementById('submitBtn');
         var originalHtml = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Assigning...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
 
-        // Find the compliance config ID to assign
-        var configId = null;
-
-        var configuredSub = subCompliances.find(function(s) { return s.configured === true; });
-
-        if (configuredSub) {
-            configId = configuredSub.id;
-        } else if (subCompliances.length > 0) {
-            configId = subCompliances[0].id;
-        }
-
-        if (!configId && parentData && parentData.id) {
-            configId = parentData.id;
-        }
-
-        if (!configId) {
-            toast('No compliance configuration found to assign', 'error');
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
-            return;
-        }
-
-        var data = await api('/api/company-admin/compliance/assign?configId=' + configId, {
+        var data = await api('/api/company-admin/compliance/parent/' + PARENT_ID + '/sync-employees', {
             method: 'POST',
             body: JSON.stringify(Array.from(selectedEmployees))
         });
@@ -1660,12 +1622,12 @@
         btn.innerHTML = originalHtml;
 
         if (data && data.success) {
-            toast('Successfully assigned to ' + selectedEmployees.size + ' employee(s)', 'success');
+            toast('Compliance assignments updated successfully (' + selectedEmployees.size + ' employee(s))', 'success');
             setTimeout(function() {
                 window.location.href = contextPath + '/company-admin/compliance/parent/' + PARENT_ID;
-            }, 1500);
+            }, 1200);
         } else {
-            toast(data?.error || 'Assignment failed', 'error');
+            toast(data?.error || 'Assignment update failed', 'error');
         }
     }
 

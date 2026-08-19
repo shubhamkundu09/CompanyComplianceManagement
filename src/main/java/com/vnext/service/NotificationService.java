@@ -25,7 +25,7 @@ public class NotificationService {
         notification.setMessage(message);
         notification.setIsActive(true);
         notification.setCreatedBy(adminId);
-        notification.setNotificationType("GENERAL");
+        notification.setNotificationType("SYSTEM_ANNOUNCEMENT");
         return notificationRepository.save(notification);
     }
 
@@ -44,7 +44,7 @@ public class NotificationService {
 
     @Transactional(readOnly = true)
     public long getActiveNotificationCount() {
-        return notificationRepository.countByIsActiveTrueAndExpiresAtIsNullOrExpiresAtAfter(LocalDateTime.now());
+        return notificationRepository.countActiveAnnouncementNotifications(LocalDateTime.now());
     }
 
     @Transactional

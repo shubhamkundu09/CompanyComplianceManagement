@@ -921,12 +921,9 @@
            </a>
 
            <div class="sidebar-label">Compliance</div>
-           <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
-               <i class="fas fa-tasks"></i> My Compliances
-           </a>
-           <a href="${baseUrl}/company-admin/compliance/custom/create" class="nav-item">
-               <i class="fas fa-plus-circle"></i> Custom Compliance
-           </a>
+            <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
+                <i class="fas fa-tasks"></i> My Compliances
+            </a>
 
            <div class="sidebar-label">Communication</div>
            <a href="${baseUrl}/company-admin/notifications" class="nav-item ">
@@ -1063,9 +1060,7 @@
                         <div>
                             <label class="form-label">User Role <span class="required">*</span></label>
                             <select id="role" class="form-input" required>
-                                <option value="">Select Role</option>
-                                <option value="EMPLOYEE">Employee</option>
-                                <option value="COMPANY_ADMIN">Sub Admin</option>
+                                <option value="EMPLOYEE" selected>Employee</option>
                             </select>
                         </div>
                     </div>
@@ -1442,11 +1437,7 @@
                 }
             }
 
-            if (role === 'COMPANY_ADMIN') {
-                url = '/api/company-admin/sub-admins';
-            } else {
-                url = '/api/company-admin/employees';
-            }
+            url = '/api/company-admin/employees';
             method = 'POST';
         }
 

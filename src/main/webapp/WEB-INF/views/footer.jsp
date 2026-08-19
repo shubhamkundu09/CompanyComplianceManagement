@@ -96,7 +96,7 @@
 <footer>
   <div class="footer-inner">
     <div>
-     <div class="logo"><img src="${baseUrl}/vnextimages/companyfiles/logo.png" alt="VNext Legal"></div>
+     <div class="logo"><img src="${baseUrl}/vnextimages/companyfiles/logo.png" alt="VNext Legal" onerror="this.style.display='none'"></div>
       <span class="footer-brand-name">VNext Legal LLP</span>
       <span class="footer-brand-sub">Advocates &middot; Solicitors &middot; Consultants</span>
       <p class="footer-brand-desc">Protecting your interests, empowering your decisions. A multidisciplinary legal consultancy delivering trusted solutions with professionalism, integrity, and excellence.</p>
