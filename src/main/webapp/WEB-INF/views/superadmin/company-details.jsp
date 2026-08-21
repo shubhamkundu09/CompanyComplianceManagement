@@ -2188,8 +2188,31 @@
                        name: a.subTemplateName,
                        status: a.status || 'PENDING',
                        configured: a.configured,
-                       dueDate: a.dueDate
+                       dueDate: a.dueDate,
+                       completedAt: a.completedAt,
+                       completedByName: a.completedByName,
+                       submissionReference: a.submissionReference
                    });
+               }
+           }
+
+           // Compute overall category status from sub-compliances if present
+           for (var key in groupedByTemplate) {
+               var group = groupedByTemplate[key];
+               if (group.subCompliances && group.subCompliances.length > 0) {
+                   var allCompleted = group.subCompliances.every(function(s) { return s.status === 'COMPLETED'; });
+                   var anyOverdue = group.subCompliances.some(function(s) { return s.status === 'OVERDUE'; });
+                   var anyInProgress = group.subCompliances.some(function(s) { return s.status === 'IN_PROGRESS' || s.status === 'COMPLETED'; });
+
+                   if (allCompleted) {
+                       group.status = 'COMPLETED';
+                   } else if (anyOverdue) {
+                       group.status = 'OVERDUE';
+                   } else if (anyInProgress) {
+                       group.status = 'IN_PROGRESS';
+                   } else {
+                       group.status = 'PENDING';
+                   }
                }
            }
 

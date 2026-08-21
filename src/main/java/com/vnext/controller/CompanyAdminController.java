@@ -176,7 +176,8 @@ public class CompanyAdminController {
         for (CompanyCompliance sub : subCompliances) {
             ComplianceConfigDTO dto = buildBaseDTO(sub, companyId, companyName);
             Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(sub.getId());
-            if (configOpt.isPresent()) {
+            boolean isFullyConfigured = configOpt.isPresent() && (configOpt.get().getFrequency() != null || configOpt.get().getDueDate() != null || configOpt.get().getCustomDueDate() != null);
+            if (isFullyConfigured) {
                 fillConfigDTO(dto, configOpt.get());
                 dto.setConfigured(true);
 
@@ -237,7 +238,8 @@ public class CompanyAdminController {
                 dto.setSubTemplateId(null);
                 dto.setSubTemplateName(null);
                 Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(parent.getId());
-                if (configOpt.isPresent()) {
+                boolean isParentFullyConfigured = configOpt.isPresent() && (configOpt.get().getFrequency() != null || configOpt.get().getDueDate() != null || configOpt.get().getCustomDueDate() != null);
+                if (isParentFullyConfigured) {
                     fillConfigDTO(dto, configOpt.get());
                     dto.setConfigured(true);
 

@@ -1007,7 +1007,7 @@
         var statusLabel = getStatusInfo(item.status).label;
         var cardIcon = getComplianceIcon(item.templateName || item.name || "");
 
-        var complianceId = item.id || item.templateId || item.companyComplianceId || null;
+        var complianceId = item.templateId || item.id || item.companyComplianceId || null;
         if (!complianceId || complianceId === "null" || complianceId === "undefined") complianceId = null;
         var hasValidId = complianceId !== null;
 
@@ -1248,7 +1248,7 @@
                     var canManage = item.canManage === true || item.editableForCompanies === true;
                     parentMap[templateId] = {
                         templateId: templateId,
-                        id: item.companyComplianceId || item.id,
+                        id: templateId,
                         templateName: item.templateName || 'Unknown',
                         canManage: canManage,
                         editableForCompanies: canManage,

@@ -299,7 +299,7 @@ public class ComplianceService {
         subCC.setIsActive(true);
         subCC.setCreatedBy(adminId);
         subCC.setIsSuperAdminConfig(false);
-        companyComplianceRepository.save(subCC);
+        subCC = companyComplianceRepository.save(subCC);
 
         addHistoryForCompanyCompliance(subCC, null, ComplianceStatus.PENDING,
                 "Sub‑Compliance Added",
@@ -383,19 +383,81 @@ public class ComplianceService {
                 if (subCCOpt.isPresent()) {
                     CompanyCompliance subCC = subCCOpt.get();
                     subMap.put("companyComplianceId", subCC.getId());
-                    subMap.put("status", subCC.getStatus());
 
                     Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(subCC.getId());
-                    subMap.put("isConfigured", configOpt.isPresent());
+                    boolean isConfigured = configOpt.isPresent() && (configOpt.get().getFrequency() != null || configOpt.get().getDueDate() != null || configOpt.get().getCustomDueDate() != null);
+                    subMap.put("isConfigured", isConfigured);
+
+                    ComplianceStatus currentStatus = subCC.getStatus() != null ? subCC.getStatus() : ComplianceStatus.PENDING;
+                    String completedByName = null;
+                    LocalDateTime completedAt = subCC.getCompletedAt();
+                    String submissionReference = subCC.getAdminSubmissionReference();
+                    String submissionDocumentUrl = subCC.getAdminSubmissionDocumentUrl();
+
+                    if (subCC.getCompletedBy() != null) {
+                        User completedUser = userRepository.findById(subCC.getCompletedBy()).orElse(null);
+                        if (completedUser != null) {
+                            completedByName = completedUser.getFullName();
+                        }
+                    }
+
                     if (configOpt.isPresent()) {
                         ComplianceConfig config = configOpt.get();
                         subMap.put("frequency", config.getFrequency() != null ? config.getFrequency().name() : null);
                         LocalDate dueDate = calculateEffectiveDueDate(config);
                         subMap.put("dueDate", dueDate != null ? dueDate.toString() : null);
+
+                        // Check employee assignments for completion
+                        Optional<EmployeeAssignment> completedAssignment = assignmentRepository
+                                .findByConfigIdAndIsActiveTrue(config.getId())
+                                .stream().filter(a -> a.getCompletedAt() != null).findFirst();
+
+                        if (completedAssignment.isPresent()) {
+                            EmployeeAssignment a = completedAssignment.get();
+                            currentStatus = ComplianceStatus.COMPLETED;
+                            completedAt = a.getCompletedAt();
+                            if (a.getSubmissionReference() != null) submissionReference = a.getSubmissionReference();
+                            if (a.getSubmissionDocumentUrl() != null) submissionDocumentUrl = a.getSubmissionDocumentUrl();
+
+                            if (a.getCompletedBy() != null) {
+                                User u = userRepository.findById(a.getCompletedBy()).orElse(null);
+                                if (u != null) completedByName = u.getFullName();
+                            } else if (a.getEmployeeId() != null) {
+                                User u = userRepository.findById(a.getEmployeeId()).orElse(null);
+                                if (u != null) completedByName = u.getFullName();
+                            }
+
+                            if (subCC.getStatus() != ComplianceStatus.COMPLETED) {
+                                subCC.setStatus(ComplianceStatus.COMPLETED);
+                                subCC.setCompletedAt(completedAt);
+                                if (a.getCompletedBy() != null) subCC.setCompletedBy(a.getCompletedBy());
+                                companyComplianceRepository.save(subCC);
+                            }
+                        } else if (subCC.getStatus() == ComplianceStatus.COMPLETED || subCC.getCompletedAt() != null) {
+                            currentStatus = ComplianceStatus.COMPLETED;
+                            if (subCC.getStatus() != ComplianceStatus.COMPLETED) {
+                                subCC.setStatus(ComplianceStatus.COMPLETED);
+                                companyComplianceRepository.save(subCC);
+                            }
+                        } else if (dueDate != null && dueDate.isBefore(LocalDate.now())) {
+                            currentStatus = ComplianceStatus.OVERDUE;
+                        }
+                    } else if (subCC.getStatus() == ComplianceStatus.COMPLETED || subCC.getCompletedAt() != null) {
+                        currentStatus = ComplianceStatus.COMPLETED;
                     }
+
+                    subMap.put("status", currentStatus.name());
+                    subMap.put("completedAt", completedAt != null ? completedAt.toString() : null);
+                    subMap.put("completedByName", completedByName);
+                    subMap.put("submissionReference", submissionReference);
+                    subMap.put("submissionDocumentUrl", submissionDocumentUrl);
                 } else {
                     subMap.put("isConfigured", false);
-                    subMap.put("status", ComplianceStatus.PENDING);
+                    subMap.put("status", ComplianceStatus.PENDING.name());
+                    subMap.put("completedAt", null);
+                    subMap.put("completedByName", null);
+                    subMap.put("submissionReference", null);
+                    subMap.put("submissionDocumentUrl", null);
                 }
                 subList.add(subMap);
             }
@@ -605,15 +667,44 @@ public class ComplianceService {
     public ParentComplianceDetailsDTO getParentComplianceDetails(Long parentId, Long companyId) {
         log.info("Getting parent compliance details for ID: {} and company: {}", parentId, companyId);
 
-        CompanyCompliance parentCC = companyComplianceRepository.findById(parentId)
-                .orElseThrow(() -> new ResourceNotFoundException("Parent compliance not found with ID: " + parentId));
+        CompanyCompliance parentCC = null;
+
+        // Try 1: Find by companyId and templateId (as parent)
+        parentCC = companyComplianceRepository
+                .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, parentId)
+                .orElse(null);
+
+        // Try 2: Find by CompanyCompliance primary key ID
+        if (parentCC == null) {
+            CompanyCompliance byId = companyComplianceRepository.findById(parentId).orElse(null);
+            if (byId != null && byId.getCompany().getId().equals(companyId)) {
+                if (byId.isParent()) {
+                    parentCC = byId;
+                } else if (byId.getTemplate() != null) {
+                    Long tId = byId.getParentTemplateId() != null ? byId.getParentTemplateId() : byId.getTemplate().getId();
+                    parentCC = companyComplianceRepository
+                            .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, tId)
+                            .orElse(null);
+                }
+            }
+        }
+
+        // Try 3: Find by companyId and any compliance under templateId
+        if (parentCC == null) {
+            List<CompanyCompliance> byTemplate = companyComplianceRepository
+                    .findByCompanyIdAndTemplateIdAndDeletedFalse(companyId, parentId);
+            if (!byTemplate.isEmpty()) {
+                parentCC = byTemplate.stream().filter(CompanyCompliance::isParent).findFirst()
+                        .orElse(byTemplate.get(0));
+            }
+        }
+
+        if (parentCC == null) {
+            throw new ResourceNotFoundException("Parent compliance not found with ID/Template ID: " + parentId);
+        }
 
         if (!parentCC.getCompany().getId().equals(companyId)) {
             throw new BusinessException("This compliance does not belong to your company");
-        }
-
-        if (!parentCC.isParent()) {
-            throw new BusinessException("This is a sub-compliance, not a parent compliance");
         }
 
         ParentComplianceDetailsDTO dto = new ParentComplianceDetailsDTO();
@@ -952,6 +1043,8 @@ public class ComplianceService {
             companyCompliance.setStatus(ComplianceStatus.IN_PROGRESS);
             companyComplianceRepository.save(companyCompliance);
 
+            autoAssignSubComplianceToEmployees(companyCompliance, companyConfig, adminId);
+
             addHistoryForCompanyCompliance(companyCompliance, ComplianceStatus.PENDING,
                     ComplianceStatus.IN_PROGRESS, "Sub-Compliance Configured",
                     "Configured sub-compliance: " + subTemplate.getName(),
@@ -1116,9 +1209,79 @@ public class ComplianceService {
         companyCompliance.setStatus(ComplianceStatus.IN_PROGRESS);
         companyComplianceRepository.save(companyCompliance);
 
+        autoAssignSubComplianceToEmployees(companyCompliance, saved, adminId);
+
         log.info("Sub-compliance configured with config ID: {}", saved.getId());
 
         return convertToConfigDTO(saved);
+    }
+
+    @Transactional
+    public void autoAssignSubComplianceToEmployees(CompanyCompliance subCC, ComplianceConfig subConfig, Long adminId) {
+        if (subCC == null || subCC.getCompany() == null) return;
+
+        Long companyId = subCC.getCompany().getId();
+        Long parentTemplateId = subCC.getParentTemplateId() != null
+                ? subCC.getParentTemplateId()
+                : (subCC.getTemplate() != null ? subCC.getTemplate().getId() : null);
+
+        if (parentTemplateId == null) return;
+
+        // Find parent CompanyCompliance for this company
+        CompanyCompliance parentCC = companyComplianceRepository
+                .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, parentTemplateId)
+                .orElse(null);
+        if (parentCC == null) return;
+
+        ComplianceConfig parentConfig = configRepository.findByCompanyComplianceId(parentCC.getId()).orElse(null);
+        if (parentConfig == null) return;
+
+        // Find all active parent EmployeeAssignments for this parent config
+        List<EmployeeAssignment> parentAssignments = assignmentRepository.findByConfigIdAndIsActiveTrue(parentConfig.getId());
+        for (EmployeeAssignment parentAssign : parentAssignments) {
+            Long employeeId = parentAssign.getEmployeeId();
+            if (employeeId == null) continue;
+
+            Optional<EmployeeAssignment> existingSubAssign = assignmentRepository
+                    .findByConfigIdAndEmployeeIdAndIsActiveTrue(subConfig.getId(), employeeId);
+
+            LocalDate subDueDate = subConfig.getDueDate() != null ? subConfig.getDueDate() : parentAssign.getDueDate();
+            boolean subAlreadyCompleted = subCC.getStatus() == ComplianceStatus.COMPLETED || subCC.getCompletedAt() != null;
+
+            if (existingSubAssign.isEmpty()) {
+                EmployeeAssignment subAssign = new EmployeeAssignment();
+                subAssign.setConfig(subConfig);
+                subAssign.setEmployeeId(employeeId);
+                subAssign.setDueDate(subDueDate);
+                subAssign.setAssignedAt(LocalDateTime.now());
+                subAssign.setIsActive(true);
+                subAssign.setIsSubAssignment(true);
+                subAssign.setParentAssignmentId(parentAssign.getId());
+                if (subAlreadyCompleted) {
+                    subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                    subAssign.setCompletedBy(subCC.getCompletedBy());
+                    subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
+                    subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
+                }
+                assignmentRepository.save(subAssign);
+                log.info("Auto-assigned newly added sub-compliance {} to employee {}", subCC.getId(), employeeId);
+            } else {
+                EmployeeAssignment subAssign = existingSubAssign.get();
+                subAssign.setIsActive(true);
+                subAssign.setIsSubAssignment(true);
+                subAssign.setParentAssignmentId(parentAssign.getId());
+                if (subAssign.getDueDate() == null && subDueDate != null) {
+                    subAssign.setDueDate(subDueDate);
+                }
+                if (subAlreadyCompleted && subAssign.getCompletedAt() == null) {
+                    subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                    subAssign.setCompletedBy(subCC.getCompletedBy());
+                    subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
+                    subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
+                }
+                assignmentRepository.save(subAssign);
+            }
+        }
     }
 
     // ==================== DELETE OPERATIONS ====================
@@ -1467,7 +1630,7 @@ public class ComplianceService {
             }
         }
 
-        if (parentCC == null) {
+if (parentCC == null) {
             throw new ResourceNotFoundException("Parent compliance not found for company " + companyId + " with ID/Template " + parentId);
         }
 
@@ -1476,7 +1639,8 @@ public class ComplianceService {
         if (parentConfig == null) {
             parentConfig = new ComplianceConfig();
             parentConfig.setCompanyCompliance(parentCC);
-            parentConfig.setTemplate(parentCC.getTemplate());
+            parentConfig.setTemplate(null);
+            parentConfig.setSubTemplate(null);
             parentConfig.setFrequency(ComplianceFrequency.YEARLY);
             parentConfig.setDueDate(LocalDate.now().plusMonths(1));
             parentConfig.setIsActive(true);
@@ -1546,7 +1710,7 @@ public class ComplianceService {
                     if (subConfig == null) {
                         subConfig = new ComplianceConfig();
                         subConfig.setCompanyCompliance(subCC);
-                        subConfig.setTemplate(subCC.getTemplate());
+                        subConfig.setTemplate(null);
                         subConfig.setSubTemplate(subCC.getSubTemplate());
                         subConfig.setFrequency(parentConfig.getFrequency() != null ? parentConfig.getFrequency() : ComplianceFrequency.YEARLY);
                         subConfig.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : LocalDate.now().plusMonths(1));
@@ -3150,10 +3314,23 @@ public class ComplianceService {
         }
 
         Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(cc.getId());
-        boolean isConfigured = configOpt.isPresent();
+        boolean isConfigured = configOpt.isPresent() && (configOpt.get().getFrequency() != null || configOpt.get().getDueDate() != null || configOpt.get().getCustomDueDate() != null);
         dto.setConfigured(isConfigured);
 
-        if (isConfigured) {
+        ComplianceStatus status = cc.getStatus() != null ? cc.getStatus() : ComplianceStatus.PENDING;
+        LocalDateTime completedAt = cc.getCompletedAt();
+        String submissionReference = cc.getAdminSubmissionReference();
+        String submissionDocumentUrl = cc.getAdminSubmissionDocumentUrl();
+        String completedByName = null;
+
+        if (cc.getCompletedBy() != null) {
+            userRepository.findById(cc.getCompletedBy()).ifPresent(user ->
+                    dto.setCompletedByName(user.getFullName())
+            );
+            completedByName = dto.getCompletedByName();
+        }
+
+        if (configOpt.isPresent()) {
             ComplianceConfig config = configOpt.get();
             if (config.getFrequency() != null) {
                 dto.setFrequency(config.getFrequency().name());
@@ -3162,7 +3339,43 @@ public class ComplianceService {
                 dto.setEffectiveDueDate(effectiveDueDate);
                 dto.setDueDate(effectiveDueDate);
 
-                if (cc.getStatus() == ComplianceStatus.COMPLETED) {
+                // Check active employee assignments for completion
+                Optional<EmployeeAssignment> completedAssignment = assignmentRepository
+                        .findByConfigIdAndIsActiveTrue(config.getId())
+                        .stream().filter(a -> a.getCompletedAt() != null).findFirst();
+
+                if (completedAssignment.isPresent()) {
+                    EmployeeAssignment a = completedAssignment.get();
+                    status = ComplianceStatus.COMPLETED;
+                    completedAt = a.getCompletedAt();
+                    if (a.getSubmissionReference() != null) submissionReference = a.getSubmissionReference();
+                    if (a.getSubmissionDocumentUrl() != null) submissionDocumentUrl = a.getSubmissionDocumentUrl();
+
+                    if (a.getCompletedBy() != null) {
+                        User u = userRepository.findById(a.getCompletedBy()).orElse(null);
+                        if (u != null) completedByName = u.getFullName();
+                    } else if (a.getEmployeeId() != null) {
+                        User u = userRepository.findById(a.getEmployeeId()).orElse(null);
+                        if (u != null) completedByName = u.getFullName();
+                    }
+
+                    if (cc.getStatus() != ComplianceStatus.COMPLETED) {
+                        cc.setStatus(ComplianceStatus.COMPLETED);
+                        cc.setCompletedAt(completedAt);
+                        if (a.getCompletedBy() != null) cc.setCompletedBy(a.getCompletedBy());
+                        companyComplianceRepository.save(cc);
+                    }
+                } else if (cc.getStatus() == ComplianceStatus.COMPLETED || cc.getCompletedAt() != null) {
+                    status = ComplianceStatus.COMPLETED;
+                    if (cc.getStatus() != ComplianceStatus.COMPLETED) {
+                        cc.setStatus(ComplianceStatus.COMPLETED);
+                        companyComplianceRepository.save(cc);
+                    }
+                } else if (effectiveDueDate != null && effectiveDueDate.isBefore(LocalDate.now())) {
+                    status = ComplianceStatus.OVERDUE;
+                }
+
+                if (status == ComplianceStatus.COMPLETED) {
                     LocalDate nextDueDate = getNextDueDateForCompliance(cc);
                     dto.setNextDueDate(nextDueDate);
                 } else {
@@ -3181,30 +3394,45 @@ public class ComplianceService {
             dto.setNextDueDate(null);
         }
 
+        if (cc.getStatus() == ComplianceStatus.COMPLETED || cc.getCompletedAt() != null) {
+            status = ComplianceStatus.COMPLETED;
+            if (completedAt == null) completedAt = cc.getCompletedAt() != null ? cc.getCompletedAt() : cc.getUpdatedAt();
+        }
+
+        // If it's a parent compliance with sub-compliances, compute parent status based on sub-compliances
+        if (cc.isParent() && cc.getCompany() != null && cc.getTemplate() != null) {
+            List<CompanyCompliance> subCCs = companyComplianceRepository
+                    .findSubCompliancesByCompanyIdAndParentTemplateId(cc.getCompany().getId(), cc.getTemplate().getId());
+            if (subCCs != null && !subCCs.isEmpty()) {
+                boolean allSubsCompleted = subCCs.stream().allMatch(s -> s.getStatus() == ComplianceStatus.COMPLETED || s.getCompletedAt() != null);
+                boolean anySubOverdue = subCCs.stream().anyMatch(s -> s.getStatus() == ComplianceStatus.OVERDUE);
+                boolean anySubInProgress = subCCs.stream().anyMatch(s -> s.getStatus() == ComplianceStatus.IN_PROGRESS || s.getStatus() == ComplianceStatus.COMPLETED || s.getCompletedAt() != null);
+
+                if (allSubsCompleted) {
+                    status = ComplianceStatus.COMPLETED;
+                    completedAt = subCCs.stream().map(CompanyCompliance::getCompletedAt).filter(Objects::nonNull).max(LocalDateTime::compareTo).orElse(cc.getCompletedAt());
+                } else if (anySubOverdue) {
+                    status = ComplianceStatus.OVERDUE;
+                } else if (anySubInProgress) {
+                    status = ComplianceStatus.IN_PROGRESS;
+                } else {
+                    status = ComplianceStatus.PENDING;
+                }
+            }
+        }
+
         if (cc.getSubTemplate() != null) {
             dto.setSubTemplateId(cc.getSubTemplate().getId());
             dto.setSubTemplateName(cc.getSubTemplate().getName());
         }
 
-        dto.setSubmissionReference(cc.getAdminSubmissionReference());
-        dto.setSubmissionDocumentUrl(cc.getAdminSubmissionDocumentUrl());
+        dto.setStatus(status);
+        dto.setSubmissionReference(submissionReference);
+        dto.setSubmissionDocumentUrl(submissionDocumentUrl);
 
-        if (cc.getStatus() == ComplianceStatus.COMPLETED) {
-            LocalDateTime completedAt = cc.getCompletedAt() != null ? cc.getCompletedAt() : cc.getUpdatedAt();
-            dto.setCompletedAt(completedAt);
-
-            if (cc.getCompletedBy() != null) {
-                userRepository.findById(cc.getCompletedBy()).ifPresent(user ->
-                        dto.setCompletedByName(user.getFullName())
-                );
-            } else if (cc.getUpdatedBy() != null) {
-                userRepository.findById(cc.getUpdatedBy()).ifPresent(user ->
-                        dto.setCompletedByName(user.getFullName())
-                );
-            }
-            if (dto.getCompletedByName() == null) {
-                dto.setCompletedByName("Company Admin");
-            }
+        if (status == ComplianceStatus.COMPLETED) {
+            dto.setCompletedAt(completedAt != null ? completedAt : cc.getUpdatedAt());
+            dto.setCompletedByName(completedByName != null ? completedByName : "Company Admin");
         } else {
             dto.setCompletedAt(null);
             dto.setCompletedByName(null);

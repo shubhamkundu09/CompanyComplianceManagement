@@ -34,9 +34,82 @@ public class AssignmentService {
 
     // ==================== EMPLOYEE ASSIGNMENTS ====================
 
-    @Transactional(readOnly = true)
+    @Transactional
+    public void syncMissingSubAssignmentsForEmployee(Long employeeId) {
+        try {
+            List<EmployeeAssignment> parentAssignments = assignmentRepository.findByEmployeeIdAndIsActiveTrue(employeeId)
+                    .stream()
+                    .filter(a -> a.getConfig() != null && Boolean.FALSE.equals(a.getIsSubAssignment()))
+                    .collect(Collectors.toList());
+
+            for (EmployeeAssignment parentAssign : parentAssignments) {
+                ComplianceConfig parentConfig = parentAssign.getConfig();
+                CompanyCompliance parentCC = parentConfig.getCompanyCompliance();
+                if (parentCC == null || parentCC.getCompany() == null) continue;
+
+                Long companyId = parentCC.getCompany().getId();
+                Long templateId = parentCC.getTemplate() != null ? parentCC.getTemplate().getId() : parentCC.getParentTemplateId();
+                if (templateId == null) continue;
+
+                List<CompanyCompliance> subCCs = companyComplianceRepository
+                        .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, templateId);
+
+                for (CompanyCompliance subCC : subCCs) {
+                    if (!Boolean.TRUE.equals(subCC.getIsActive()) || subCC.isDeleted()) continue;
+
+                    ComplianceConfig subConfig = configRepository.findByCompanyComplianceId(subCC.getId()).orElse(null);
+                    if (subConfig == null) {
+                        subConfig = new ComplianceConfig();
+                        subConfig.setCompanyCompliance(subCC);
+                        subConfig.setTemplate(null);
+                        subConfig.setSubTemplate(subCC.getSubTemplate());
+                        subConfig.setFrequency(parentConfig.getFrequency() != null ? parentConfig.getFrequency() : ComplianceFrequency.YEARLY);
+                        subConfig.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : LocalDate.now().plusMonths(1));
+                        subConfig.setIsActive(true);
+                        subConfig.setConfiguredBy(parentConfig.getConfiguredBy());
+                        subConfig = configRepository.save(subConfig);
+                    }
+
+                    Optional<EmployeeAssignment> existingSub = assignmentRepository
+                            .findByConfigIdAndEmployeeIdAndIsActiveTrue(subConfig.getId(), employeeId);
+
+                    if (existingSub.isEmpty()) {
+                        EmployeeAssignment subAssign = new EmployeeAssignment();
+                        subAssign.setConfig(subConfig);
+                        subAssign.setEmployeeId(employeeId);
+                        subAssign.setDueDate(subConfig.getDueDate() != null ? subConfig.getDueDate() : parentAssign.getDueDate());
+                        subAssign.setAssignedAt(LocalDateTime.now());
+                        subAssign.setIsActive(true);
+                        subAssign.setIsSubAssignment(true);
+                        subAssign.setParentAssignmentId(parentAssign.getId());
+                        if (subCC.getStatus() == ComplianceStatus.COMPLETED || subCC.getCompletedAt() != null) {
+                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                            subAssign.setCompletedBy(subCC.getCompletedBy());
+                            subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
+                            subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
+                        }
+                        assignmentRepository.save(subAssign);
+                        log.info("Synced newly added sub-compliance {} to employee {}", subCC.getId(), employeeId);
+                    } else {
+                        EmployeeAssignment sub = existingSub.get();
+                        if (sub.getParentAssignmentId() == null) {
+                            sub.setParentAssignmentId(parentAssign.getId());
+                            sub.setIsSubAssignment(true);
+                            assignmentRepository.save(sub);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error during syncMissingSubAssignmentsForEmployee for employee {}: {}", employeeId, e.getMessage(), e);
+        }
+    }
+
+    @Transactional
     public Page<EmployeeComplianceDTO> getEmployeeAssignments(Long employeeId, String status, Pageable pageable) {
         log.info("Fetching assignments for employee: {}", employeeId);
+
+        syncMissingSubAssignmentsForEmployee(employeeId);
 
         List<EmployeeAssignment> allAssignments = assignmentRepository
                 .findByEmployeeIdAndIsActiveTrue(employeeId);
@@ -97,6 +170,12 @@ public class AssignmentService {
             throw new ResourceNotFoundException("Company compliance not found with ID: " + companyComplianceId);
         }
 
+        // Validate that this compliance/sub-compliance is configured first
+        ComplianceConfig config = configRepository.findByCompanyComplianceId(companyCompliance.getId()).orElse(null);
+        if (config == null || (config.getFrequency() == null && config.getDueDate() == null && config.getCustomDueDate() == null)) {
+            throw new BusinessException("Please configure this sub-compliance first before marking it as complete.");
+        }
+
         LocalDateTime now = LocalDateTime.now();
 
         // Save admin submission data on CompanyCompliance
@@ -112,7 +191,6 @@ public class AssignmentService {
         companyComplianceRepository.save(companyCompliance);
 
         // Update ALL active EmployeeAssignment records for this config
-        ComplianceConfig config = configRepository.findByCompanyComplianceId(companyCompliance.getId()).orElse(null);
         if (config != null) {
             List<EmployeeAssignment> assignments = assignmentRepository.findByConfigIdAndIsActiveTrue(config.getId());
             for (EmployeeAssignment assignment : assignments) {
@@ -185,9 +263,11 @@ public class AssignmentService {
         );
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<EmployeeComplianceDTO> getEmployeeCategories(Long employeeId) {
         log.info("Fetching categories for employee: {}", employeeId);
+
+        syncMissingSubAssignmentsForEmployee(employeeId);
 
         List<EmployeeAssignment> assignments = assignmentRepository
                 .findByEmployeeIdAndIsActiveTrue(employeeId, Pageable.unpaged()).getContent();
@@ -247,9 +327,11 @@ public class AssignmentService {
         return new ArrayList<>(categoryMap.values());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<EmployeeComplianceDTO> getSubCompliancesByCategory(Long parentAssignmentId, Long employeeId) {
         log.info("Fetching sub-compliances for parent: {}", parentAssignmentId);
+
+        syncMissingSubAssignmentsForEmployee(employeeId);
 
         EmployeeAssignment parent = assignmentRepository.findById(parentAssignmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Assignment not found"));

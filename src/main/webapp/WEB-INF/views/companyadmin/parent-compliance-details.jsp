@@ -2271,23 +2271,23 @@
                var today = new Date();
                today.setHours(0, 0, 0, 0);
 
+               // Priority 1: Match by templateId with parent entry (subTemplateId is null)
                var targetEntry = allCompliances.find(function (c) {
-                   return c.templateId === parentIdNum;
+                   return c.templateId === parentIdNum && (!c.subTemplateId);
                });
 
+               // Priority 2: Match by templateId
                if (!targetEntry) {
                    targetEntry = allCompliances.find(function (c) {
-                       return c.id === parentIdNum || c.companyComplianceId === parentIdNum;
+                       return c.templateId === parentIdNum;
                    });
                }
 
+               // Priority 3: Match by companyComplianceId or id
                if (!targetEntry) {
-                   var templateEntries = allCompliances.filter(function (c) {
-                       return c.templateId === parentIdNum;
+                   targetEntry = allCompliances.find(function (c) {
+                       return c.companyComplianceId === parentIdNum || c.id === parentIdNum;
                    });
-                   if (templateEntries.length > 0) {
-                       targetEntry = templateEntries[0];
-                   }
                }
 
                if (!targetEntry) {
@@ -2759,20 +2759,21 @@
                             ",'" +
                             escapeHtml(s.subTemplateName) +
                             '\')" class="btn btn-ghost btn-sm" style="color:var(--primary);" title="Edit Completion Details"><i class="fas fa-edit"></i> Edit</button>')
-                    : '<button class="btn btn-ghost btn-sm" disabled style="opacity:0.4;cursor:not-allowed;" title="Configure this sub-compliance first"><i class="fas fa-lock"></i> Not Configured</button>') +
-                // Show Configure/Edit/Delete ONLY for sub-compliances under Editable categories (canManage = true)
-                (parentData && parentData.canManage
-                    ? (isConfigured
+                    : (parentData && parentData.canManage
                         ? '<button onclick="event.stopPropagation();openConfigModalForSub(' +
                             s.subTemplateId +
-                            ')" class="btn btn-ghost btn-sm" title="Edit Configuration"><i class="fas fa-cog"></i> Configure</button>' +
+                            ')" class="btn btn-primary btn-sm" title="Configure Sub-Compliance"><i class="fas fa-cog"></i> Configure</button>'
+                        : '<button class="btn btn-ghost btn-sm" disabled style="opacity:0.4;cursor:not-allowed;" title="Not Configured"><i class="fas fa-lock"></i> Not Configured</button>')) +
+                // Show Edit/Delete ONLY for sub-compliances under Editable categories (canManage = true)
+                (parentData && parentData.canManage
+                    ? (isConfigured
+                        ? ' <button onclick="event.stopPropagation();openConfigModalForSub(' +
+                            s.subTemplateId +
+                            ')" class="btn btn-ghost btn-sm" title="Edit Configuration"><i class="fas fa-cog"></i> Edit Config</button>' +
                           ' <button onclick="event.stopPropagation();deleteSubCompliance(' +
                             s.subTemplateId +
                             ')" class="btn btn-danger btn-sm" title="Delete Sub-Compliance"><i class="fas fa-trash"></i></button>'
-                        : '<button onclick="event.stopPropagation();openConfigModalForSub(' +
-                            s.subTemplateId +
-                            ')" class="btn btn-success btn-sm" title="Configure"><i class="fas fa-cog"></i> Configure</button>' +
-                          ' <button onclick="event.stopPropagation();deleteSubCompliance(' +
+                        : ' <button onclick="event.stopPropagation();deleteSubCompliance(' +
                             s.subTemplateId +
                             ')" class="btn btn-danger btn-sm" title="Delete Sub-Compliance"><i class="fas fa-trash"></i></button>')
                     : '') +
@@ -3113,6 +3114,14 @@
         var subObj = allSubCompliances.find(function(s) {
             return s.id == complianceId || s.companyComplianceId == complianceId;
         });
+
+        if (subObj && !subObj.configured) {
+            toast('Please configure this sub-compliance first before marking it as complete.', 'warning');
+            if (parentData && parentData.canManage) {
+                openConfigModalForSub(subObj.subTemplateId);
+            }
+            return;
+        }
 
         if (subObj && subObj.status === "COMPLETED") {
             document.getElementById("markCompleteReference").value = subObj.submissionReference || "";

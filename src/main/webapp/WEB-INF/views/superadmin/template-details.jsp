@@ -2566,6 +2566,14 @@
                             } else {
                                 html += '<span style="font-size:11px;color:var(--warning);"><i class="fas fa-clock"></i> Not Configured</span>';
                             }
+                            if (s.status === 'COMPLETED' || s.completedAt) {
+                                html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100);font-size:11px;color:var(--gray-600);">';
+                                if (s.completedByName) html += '<div style="color:var(--success);"><i class="fas fa-user-check" style="margin-right:4px;"></i> Completed by: <strong>' + escapeHtml(s.completedByName) + '</strong></div>';
+                                if (s.completedAt) html += '<div><i class="far fa-clock" style="color:var(--gray-500);margin-right:4px;"></i> Completed On: ' + formatDateTime(s.completedAt) + '</div>';
+                                if (s.submissionReference) html += '<div><i class="fas fa-hashtag" style="color:var(--gray-500);margin-right:4px;"></i> Ref: ' + escapeHtml(s.submissionReference) + '</div>';
+                                if (s.submissionDocumentUrl) html += '<div><a href="' + contextPath + escapeHtml(s.submissionDocumentUrl) + '" target="_blank" style="color:var(--primary);"><i class="fas fa-paperclip"></i> View Document</a></div>';
+                                html += '</div>';
+                            }
                             html += '</div>';
                         }
                         html += '</div>';
@@ -2922,6 +2930,13 @@
                         (frequencyDisplay !== "—" ? '<span><i class="fas fa-redo" style="color:var(--primary);"></i> ' + frequencyDisplay + "</span>" : "") +
                         '<span class="' + dueDateClass + '"><i class="fas fa-calendar-alt" style="color:var(--primary);"></i> Due: ' + dueDateDisplay + "</span>" +
                         "</div>" +
+                        (subStatus === "COMPLETED" || c.completedAt
+                            ? '<div style="margin-top:4px;padding-top:4px;border-top:1px dashed var(--gray-200);font-size:10px;color:var(--gray-600);display:flex;gap:12px;flex-wrap:wrap;">' +
+                              (c.completedByName ? '<span style="color:var(--success);"><i class="fas fa-user-check"></i> ' + escapeHtml(c.completedByName) + '</span>' : '') +
+                              (c.completedAt ? '<span><i class="far fa-clock"></i> ' + formatDateTime(c.completedAt) + '</span>' : '') +
+                              (c.submissionReference ? '<span><i class="fas fa-hashtag"></i> Ref: ' + escapeHtml(c.submissionReference) + '</span>' : '') +
+                              '</div>'
+                            : '') +
                         "</div>" +
                         '<span class="sub-status ' + subStatusClass +
                         '" style="font-size:9px;padding:2px 10px;flex-shrink:0;">' +
