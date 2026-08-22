@@ -26,6 +26,7 @@ public class EmployeeService {
     private final CompanyService companyService;
     private final EmailService emailService;
     private final PasswordEncoder passwordEncoder;
+    private final NotificationEventService notificationEventService;
 
 
     // Add this method to EmployeeService.java
@@ -148,6 +149,18 @@ public class EmployeeService {
         }
 
         log.info("Employee created successfully with ID: {} and code: {}", savedEmployee.getId(), employeeCode);
+
+        // Push notification to Company Admin
+        if (company.getCompanyAdmin() != null) {
+            notificationEventService.notifyUserPushOnly(
+                    company.getCompanyAdmin().getId(),
+                    "Employee Created",
+                    "Employee " + savedEmployee.getFullName() + " has been added to " + company.getName() + ".",
+                    NotificationType.EMPLOYEE_CREATED,
+                    "employees"
+            );
+        }
+
         return convertToDTO(savedEmployee);
     }
 
@@ -186,6 +199,25 @@ public class EmployeeService {
 
         User updatedEmployee = userRepository.save(employee);
         log.info("Employee updated successfully with ID: {}", updatedEmployee.getId());
+
+        // Push notification to Company Admin and Employee
+        if (employee.getCompany() != null && employee.getCompany().getCompanyAdmin() != null) {
+            notificationEventService.notifyUserPushOnly(
+                    employee.getCompany().getCompanyAdmin().getId(),
+                    "Employee Updated",
+                    "Employee " + updatedEmployee.getFullName() + " details have been updated.",
+                    NotificationType.EMPLOYEE_UPDATED,
+                    "employees"
+            );
+        }
+        notificationEventService.notifyUserPushOnly(
+                updatedEmployee.getId(),
+                "Profile Updated",
+                "Your employee profile has been updated by your Company Admin.",
+                NotificationType.EMPLOYEE_UPDATED,
+                "profile"
+        );
+
         return convertToDTO(updatedEmployee);
     }
 
@@ -214,6 +246,17 @@ public class EmployeeService {
         // Update company active employee count
         if (companyId != null) {
             companyService.updateActiveEmployeeCount(companyId);
+        }
+
+        // Push notification to Company Admin
+        if (employee.getCompany() != null && employee.getCompany().getCompanyAdmin() != null) {
+            notificationEventService.notifyUserPushOnly(
+                    employee.getCompany().getCompanyAdmin().getId(),
+                    "Employee Removed",
+                    "Employee " + employee.getFullName() + " has been removed from your company.",
+                    NotificationType.EMPLOYEE_DELETED,
+                    "employees"
+            );
         }
 
         log.info("Employee deleted successfully with ID: {}", employeeId);

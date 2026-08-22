@@ -169,17 +169,18 @@ public class SchedulerService {
             String complianceName = getComplianceName(assignment);
             String employeeName = getUserName(assignment.getEmployeeId());
             Long companyId = getCompanyIdFromAssignment(assignment);
+            String companyName = getCompanyNameFromAssignment(assignment);
 
-            // Push to employee
+            // 1. Push to employee
             notificationEventService.notifyUserPushOnly(
                     assignment.getEmployeeId(),
                     "Compliance Overdue",
-                    "Your compliance \"" + complianceName + "\" is overdue.",
+                    "Your assigned compliance \"" + complianceName + "\" is overdue.",
                     NotificationType.COMPLIANCE_OVERDUE,
-                    "compliance_details"
+                    "employee_compliance"
             );
 
-            // Push to company admin
+            // 2. Push to company admin
             if (companyId != null) {
                 var companyAdmin = companyRepository.findById(companyId)
                         .map(Company::getCompanyAdmin).orElse(null);
@@ -187,12 +188,20 @@ public class SchedulerService {
                     notificationEventService.notifyUserPushOnly(
                             companyAdmin.getId(),
                             "Compliance Overdue",
-                            "Employee " + employeeName + " has overdue compliance \"" + complianceName + "\".",
+                            "Company " + companyName + " has overdue compliance \"" + complianceName + "\" (assigned to " + employeeName + ").",
                             NotificationType.COMPLIANCE_OVERDUE,
                             "compliance_details"
                     );
                 }
             }
+
+            // 3. Push to SuperAdmins
+            notificationEventService.notifySuperAdminsPushOnly(
+                    "Compliance Overdue",
+                    "Company " + companyName + " is overdue on compliance \"" + complianceName + "\" (Employee: " + employeeName + ").",
+                    NotificationType.COMPLIANCE_OVERDUE,
+                    "compliance_details"
+            );
 
             // Mark as notified
             assignment.setOverdueNotifiedAt(LocalDateTime.now());
@@ -203,13 +212,13 @@ public class SchedulerService {
         log.info("Overdue employee notifications sent for {} assignments.", overdueAssignments.size());
     }
 
-    // ─── 3. DUE REMINDERS (Push Notifications) ──────────────────────────────
-    @Scheduled(cron = "0 0 8 * * *") // daily at 08:00
+    // ─── 3. DUE REMINDERS (Push Notifications - 3x Daily) ───────────────────
+    @Scheduled(cron = "0 0 9,14,19 * * *") // 3 times daily at 09:00, 14:00, 19:00
     @Transactional
     public void sendDueReminders() {
-        log.info("Checking due reminders...");
+        log.info("Checking due reminders (3x daily schedule)...");
         LocalDate today = LocalDate.now();
-        LocalDate future = today.plusDays(30);
+        LocalDate future = today.plusDays(60);
 
         List<EmployeeAssignment> upcomingAssignments = assignmentRepository
                 .findActiveUpcomingAssignments(today, future);
@@ -219,28 +228,34 @@ public class SchedulerService {
             return;
         }
 
-        log.info("Found {} upcoming assignments", upcomingAssignments.size());
+        log.info("Found {} upcoming assignments for reminder check", upcomingAssignments.size());
 
         for (EmployeeAssignment assignment : upcomingAssignments) {
             var config = assignment.getConfig();
             if (config == null) continue;
-            int reminderDays = config.getReminderDaysBefore() != null ? config.getReminderDaysBefore() : 10;
             LocalDate dueDate = assignment.getDueDate();
-            if (dueDate == null) continue;
+            if (dueDate == null || !dueDate.isAfter(today)) continue;
 
-            // Send if today is exactly reminderDays before the due date
-            if (dueDate.minusDays(reminderDays).equals(today)) {
+            int reminderDays = config.getReminderDaysBefore() != null ? config.getReminderDaysBefore() : 10;
+            int intervalDays = (config.getReminderIntervalDays() != null && config.getReminderIntervalDays() > 0) ? config.getReminderIntervalDays() : 3;
+            long daysRemaining = ChronoUnit.DAYS.between(today, dueDate);
+
+            // Check if today falls on the reminder schedule (e.g. 10 days before, then every 3 days: 10, 7, 4, 1)
+            boolean shouldSend = (daysRemaining == reminderDays) ||
+                    (daysRemaining < reminderDays && (reminderDays - daysRemaining) % intervalDays == 0);
+
+            if (shouldSend) {
                 String complianceName = getComplianceName(assignment);
                 String employeeName = getUserName(assignment.getEmployeeId());
                 Long companyId = getCompanyIdFromAssignment(assignment);
 
-                // Push to employee
+                // Push to assigned employee
                 notificationEventService.notifyUserPushOnly(
                         assignment.getEmployeeId(),
                         "Compliance Due Soon",
-                        "Compliance \"" + complianceName + "\" is due in " + reminderDays + " days.",
+                        "Compliance \"" + complianceName + "\" is due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + ".",
                         NotificationType.COMPLIANCE_DUE_SOON,
-                        "compliance_details"
+                        "employee_compliance"
                 );
 
                 // Push to company admin
@@ -251,20 +266,19 @@ public class SchedulerService {
                         notificationEventService.notifyUserPushOnly(
                                 companyAdmin.getId(),
                                 "Compliance Due Soon",
-                                "Employee " + employeeName + " has compliance \"" + complianceName + "\" due in " + reminderDays + " days.",
+                                "Employee " + employeeName + " has compliance \"" + complianceName + "\" due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + ".",
                                 NotificationType.COMPLIANCE_DUE_SOON,
                                 "compliance_details"
                         );
                     }
                 }
 
-                // Mark reminder sent
                 assignment.setLastReminderSent(today);
                 assignmentRepository.save(assignment);
             }
         }
 
-        log.info("Due reminders processed.");
+        log.info("Due reminders processed successfully.");
     }
 
     // ─── 4. OVERDUE COMPANY COMPLIANCES (Email to SuperAdmin) ──────────────
@@ -320,11 +334,14 @@ public class SchedulerService {
         if (assignment == null) return "Compliance";
         var config = assignment.getConfig();
         if (config == null) return "Compliance";
+        if (config.getSubTemplate() != null) return config.getSubTemplate().getName();
+        if (config.getTemplate() != null) return config.getTemplate().getName();
         var cc = config.getCompanyCompliance();
-        if (cc == null) return "Compliance";
-        var template = cc.getTemplate();
-        if (template == null) return "Compliance";
-        return template.getName();
+        if (cc != null) {
+            if (cc.getSubTemplate() != null) return cc.getSubTemplate().getName();
+            if (cc.getTemplate() != null) return cc.getTemplate().getName();
+        }
+        return "Compliance";
     }
 
     private String getUserName(Long userId) {
@@ -341,5 +358,16 @@ public class SchedulerService {
         var company = cc.getCompany();
         if (company == null) return null;
         return company.getId();
+    }
+
+    private String getCompanyNameFromAssignment(EmployeeAssignment assignment) {
+        if (assignment == null) return "Company";
+        var config = assignment.getConfig();
+        if (config == null) return "Company";
+        var cc = config.getCompanyCompliance();
+        if (cc == null) return "Company";
+        var company = cc.getCompany();
+        if (company == null) return "Company";
+        return company.getName();
     }
 }

@@ -20,27 +20,38 @@ public class DeviceTokenService {
 
     @Transactional
     public void registerDeviceToken(Long userId, String token, String platform, String deviceName, String appVersion) {
+        if (token == null || token.trim().isEmpty() || userId == null) return;
+
+        Platform p = Platform.ANDROID;
+        try {
+            if (platform != null) {
+                p = Platform.valueOf(platform.toUpperCase());
+            }
+        } catch (Exception e) {
+            p = Platform.ANDROID;
+        }
+
         var existing = deviceTokenRepository.findByUserIdAndDeviceToken(userId, token);
         if (existing.isPresent()) {
             var device = existing.get();
-            device.setPlatform(Platform.valueOf(platform.toUpperCase()));
+            device.setPlatform(p);
             device.setDeviceName(deviceName);
             device.setAppVersion(appVersion);
             device.setLastSeen(LocalDateTime.now());
             deviceTokenRepository.save(device);
-            log.info("Updated device token for user {}", userId);
+            log.info("Updated device token for user {}: platform={}, device={}", userId, p, deviceName);
             return;
         }
 
         var newDevice = new DeviceToken();
         newDevice.setUserId(userId);
         newDevice.setDeviceToken(token);
-        newDevice.setPlatform(Platform.valueOf(platform.toUpperCase()));
+        newDevice.setPlatform(p);
         newDevice.setDeviceName(deviceName);
         newDevice.setAppVersion(appVersion);
         newDevice.setLastSeen(LocalDateTime.now());
         deviceTokenRepository.save(newDevice);
-        log.info("Registered device token for user {}", userId);
+        log.info("Registered new device token for user {}: platform={}, device={}", userId, p, deviceName);
     }
 
     @Transactional

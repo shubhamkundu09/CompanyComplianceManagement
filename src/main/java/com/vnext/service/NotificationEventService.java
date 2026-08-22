@@ -23,6 +23,7 @@ public class NotificationEventService {
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final com.vnext.repository.CompanyRepository companyRepository;
     private final PushNotificationService pushNotificationService;
 
     // ─── SAVE + PUSH (for SuperAdmin announcements) ─────────────────────────
@@ -75,7 +76,10 @@ public class NotificationEventService {
     // ─── PUSH ONLY (for business events) ─────────────────────────────────────
 
     public void notifyUsersPushOnly(List<Long> userIds, String title, String body, NotificationType type, String screen) {
-        if (userIds.isEmpty()) return;
+        if (userIds == null || userIds.isEmpty()) return;
+
+        List<Long> distinctUserIds = userIds.stream().filter(java.util.Objects::nonNull).distinct().collect(Collectors.toList());
+        if (distinctUserIds.isEmpty()) return;
 
         var payload = NotificationPayload.builder()
                 .title(title)
@@ -84,7 +88,7 @@ public class NotificationEventService {
                 .screen(screen)
                 .build();
 
-        sendPushAsync(userIds, payload);
+        sendPushAsync(distinctUserIds, payload);
     }
 
     public void notifySuperAdminsPushOnly(String title, String body, NotificationType type, String screen) {
@@ -94,13 +98,57 @@ public class NotificationEventService {
     }
 
     public void notifyUserPushOnly(Long userId, String title, String body, NotificationType type, String screen) {
-        notifyUsersPushOnly(List.of(userId), title, body, type, screen);
+        if (userId != null) {
+            notifyUsersPushOnly(List.of(userId), title, body, type, screen);
+        }
+    }
+
+    public List<Long> getCompanyAdminUserIds(Long companyId) {
+        java.util.Set<Long> adminIds = new java.util.HashSet<>();
+        if (companyId != null) {
+            userRepository.findByCompanyIdAndRoleAndDeletedFalse(companyId, UserRole.COMPANY_ADMIN, Pageable.unpaged())
+                    .forEach(u -> adminIds.add(u.getId()));
+            companyRepository.findById(companyId).ifPresent(c -> {
+                if (c.getCompanyAdmin() != null && c.getCompanyAdmin().getId() != null) {
+                    adminIds.add(c.getCompanyAdmin().getId());
+                }
+            });
+        }
+        return new java.util.ArrayList<>(adminIds);
+    }
+
+    public List<Long> getAllActiveCompanyAdminUserIds() {
+        java.util.Set<Long> adminIds = new java.util.HashSet<>();
+        List<com.vnext.entity.Company> activeCompanies = companyRepository.findActiveCompaniesByStatus(com.vnext.entity.CompanyStatus.ACTIVE);
+        for (com.vnext.entity.Company c : activeCompanies) {
+            userRepository.findByCompanyIdAndRoleAndDeletedFalse(c.getId(), UserRole.COMPANY_ADMIN, Pageable.unpaged())
+                    .forEach(u -> adminIds.add(u.getId()));
+            if (c.getCompanyAdmin() != null && c.getCompanyAdmin().getId() != null) {
+                adminIds.add(c.getCompanyAdmin().getId());
+            }
+        }
+        return new java.util.ArrayList<>(adminIds);
     }
 
     public void notifyCompanyAdminsPushOnly(Long companyId, String title, String body, NotificationType type, String screen) {
-        var admins = userRepository.findByCompanyIdAndRoleAndDeletedFalse(companyId, UserRole.COMPANY_ADMIN, Pageable.unpaged())
-                .stream().map(User::getId).collect(Collectors.toList());
-        notifyUsersPushOnly(admins, title, body, type, screen);
+        List<Long> adminIds = getCompanyAdminUserIds(companyId);
+        if (!adminIds.isEmpty()) {
+            notifyUsersPushOnly(adminIds, title, body, type, screen);
+        }
+    }
+
+    public void notifyAllActiveCompanyAdminsPushOnly(String title, String body, NotificationType type, String screen) {
+        List<Long> adminIds = getAllActiveCompanyAdminUserIds();
+        if (!adminIds.isEmpty()) {
+            notifyUsersPushOnly(adminIds, title, body, type, screen);
+        }
+    }
+
+    public void notifyAllActiveCompanyAdminsWithSave(String title, String body, NotificationType type, String screen) {
+        List<Long> adminIds = getAllActiveCompanyAdminUserIds();
+        if (!adminIds.isEmpty()) {
+            notifyUsersWithSave(adminIds, title, body, type, screen, UserRole.COMPANY_ADMIN.name());
+        }
     }
 
     public void notifyCompanyUsersPushOnly(Long companyId, String title, String body, NotificationType type, String screen) {

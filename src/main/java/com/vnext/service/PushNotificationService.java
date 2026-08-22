@@ -26,16 +26,20 @@ public class PushNotificationService {
                 .filter(t -> t != null && !t.trim().isEmpty())
                 .collect(Collectors.toList());
 
-        if (tokens.isEmpty()) {
-            log.info("No active device token registered for user {}", userId);
+        var realTokens = tokens.stream()
+                .filter(t -> !t.startsWith("SIMULATOR_") && !t.startsWith("MOCK_"))
+                .collect(Collectors.toList());
+
+        if (realTokens.isEmpty()) {
+            log.warn("No real FCM device token registered for user {}. Total stored tokens: {}", userId, tokens.size());
             return;
         }
-        sendMulticast(tokens, payload);
+        sendMulticast(realTokens, payload);
     }
 
     public void sendToUsers(List<Long> userIds, NotificationPayload payload) {
         log.info("Sending push notification to user IDs {}: {} - {}", userIds, payload.getTitle(), payload.getBody());
-        if (userIds.isEmpty()) return;
+        if (userIds == null || userIds.isEmpty()) return;
 
         var tokens = deviceTokenRepository.findByUserIdIn(userIds)
                 .stream()
@@ -48,7 +52,7 @@ public class PushNotificationService {
                 .collect(Collectors.toList());
 
         if (realTokens.isEmpty()) {
-            log.info("No real FCM device tokens registered for target user IDs {} (simulator/mock tokens ignored for FCM remote call)", userIds);
+            log.warn("No real FCM device tokens registered for target user IDs {}. Total tokens found: {}", userIds, tokens.size());
             return;
         }
         sendMulticast(realTokens, payload);
@@ -58,6 +62,32 @@ public class PushNotificationService {
         if (tokens.isEmpty()) return;
 
         try {
+            AndroidConfig androidConfig = AndroidConfig.builder()
+                    .setPriority(AndroidConfig.Priority.HIGH)
+                    .setNotification(AndroidNotification.builder()
+                            .setTitle(payload.getTitle())
+                            .setBody(payload.getBody())
+                            .setSound("default")
+                            .setChannelId("compliance_notifications")
+                            .setDefaultSound(true)
+                            .setDefaultVibrateTimings(true)
+                            .build())
+                    .build();
+
+            ApnsConfig apnsConfig = ApnsConfig.builder()
+                    .putHeader("apns-priority", "10")
+                    .putHeader("apns-push-type", "alert")
+                    .setAps(Aps.builder()
+                            .setAlert(ApsAlert.builder()
+                                    .setTitle(payload.getTitle())
+                                    .setBody(payload.getBody())
+                                    .build())
+                            .setSound("default")
+                            .setBadge(1)
+                            .setContentAvailable(true)
+                            .build())
+                    .build();
+
             MulticastMessage message = MulticastMessage.builder()
                     .addAllTokens(tokens)
                     .setNotification(Notification.builder()
@@ -65,24 +95,13 @@ public class PushNotificationService {
                             .setBody(payload.getBody())
                             .build())
                     .putAllData(payload.getData())
-                    .setApnsConfig(ApnsConfig.builder()
-                            .putHeader("apns-priority", "10")
-                            .putHeader("apns-push-type", "alert")
-                            .setAps(Aps.builder()
-                                    .setAlert(ApsAlert.builder()
-                                            .setTitle(payload.getTitle())
-                                            .setBody(payload.getBody())
-                                            .build())
-                                    .setSound("default")
-                                    .setBadge(1)
-                                    .setContentAvailable(true)
-                                    .build())
-                            .build())
+                    .setAndroidConfig(androidConfig)
+                    .setApnsConfig(apnsConfig)
                     .build();
 
             // Use sendEachForMulticast instead of deprecated sendMulticast
             BatchResponse response = FirebaseMessaging.getInstance().sendEachForMulticast(message);
-            log.info("Multicast push: success={}, failure={}", response.getSuccessCount(), response.getFailureCount());
+            log.info("Multicast push sent to {} devices: success={}, failure={}", tokens.size(), response.getSuccessCount(), response.getFailureCount());
 
             if (response.getFailureCount() > 0) {
                 for (int i = 0; i < response.getResponses().size(); i++) {
@@ -111,7 +130,7 @@ public class PushNotificationService {
                 }
             }
         } catch (FirebaseMessagingException e) {
-            log.error("Firebase multicast error: {}", e.getMessage());
+            log.error("Firebase multicast error: {}", e.getMessage(), e);
         }
     }
 }

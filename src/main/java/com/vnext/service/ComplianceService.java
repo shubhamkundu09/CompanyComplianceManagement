@@ -141,41 +141,9 @@ public class ComplianceService {
         addHistoryForTemplate(parentId, "Sub-Compliance Added",
                 "Added sub-compliance: " + saved.getName() + " under parent: " + parent.getName() + " with display order: " + saved.getDisplayOrder(), adminId);
 
-        // Notify company admins (existing logic)
-        List<Long> companyAdminUserIds = new ArrayList<>();
-        List<CompanyCompliance> parentCCs = companyComplianceRepository.findByTemplateIdAndIsParentTrue(parentId);
-        for (CompanyCompliance cc : parentCCs) {
-            if (cc.getCompany() != null && cc.getCompany().getStatus() == CompanyStatus.ACTIVE && cc.getCompany().getCompanyAdmin() != null) {
-                Long adminUserId = cc.getCompany().getCompanyAdmin().getId();
-                if (adminUserId != null && !companyAdminUserIds.contains(adminUserId)) {
-                    companyAdminUserIds.add(adminUserId);
-                }
-            }
-        }
-        if (companyAdminUserIds.isEmpty()) {
-            companyRepository.findActiveCompaniesByStatus(CompanyStatus.ACTIVE).forEach(c -> {
-                if (c.getCompanyAdmin() != null && c.getCompanyAdmin().getId() != null) {
-                    if (!companyAdminUserIds.contains(c.getCompanyAdmin().getId())) {
-                        companyAdminUserIds.add(c.getCompanyAdmin().getId());
-                    }
-                }
-            });
-        }
-
-        if (!companyAdminUserIds.isEmpty()) {
-            notificationEventService.notifyUsersWithSave(
-                    companyAdminUserIds,
-                    "New Sub-Compliance Created",
-                    "SuperAdmin created a new sub-compliance \"" + saved.getName() + "\" under \"" + parent.getName() + "\" and it is assigned to your company. Go and check accordingly.",
-                    NotificationType.SUB_COMPLIANCE_CREATED,
-                    "compliance_details",
-                    UserRole.COMPANY_ADMIN.name()
-            );
-        }
-
-        notificationEventService.notifySuperAdminsWithSave(
-                "Sub-Compliance Created Successfully",
-                "Sub-compliance \"" + saved.getName() + "\" under \"" + parent.getName() + "\" details and configurations saved successfully.",
+        notificationEventService.notifySuperAdminsPushOnly(
+                "Sub-Compliance Created",
+                "Sub-compliance \"" + saved.getName() + "\" has been created under \"" + parent.getName() + "\".",
                 NotificationType.SUB_COMPLIANCE_CREATED,
                 "compliance_details"
         );
@@ -610,15 +578,13 @@ public class ComplianceService {
                 "compliance_details"
         );
 
-        if (company.getCompanyAdmin() != null) {
-            notificationEventService.notifyUserPushOnly(
-                    company.getCompanyAdmin().getId(),
-                    "New Compliance Assigned",
-                    "Compliance \"" + template.getName() + "\" has been assigned to your company.",
-                    NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
-                    "compliance_details"
-            );
-        }
+        notificationEventService.notifyCompanyAdminsPushOnly(
+                companyId,
+                "New Compliance Assigned",
+                "Compliance \"" + template.getName() + "\" has been assigned to your company.",
+                NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                "compliance_details"
+        );
     }
 
 
@@ -857,38 +823,14 @@ public class ComplianceService {
                         (dto.getDueDate() != null ? ", Due: " + dto.getDueDate().toString() : ""), adminId);
 
         // Notifications
-        List<Long> companyAdminUserIds = new ArrayList<>();
-        List<CompanyCompliance> assignedCCs = companyComplianceRepository.findByTemplateIdAndIsParentTrue(templateId);
-        for (CompanyCompliance cc : assignedCCs) {
-            if (cc.getCompany() != null && cc.getCompany().getStatus() == CompanyStatus.ACTIVE && cc.getCompany().getCompanyAdmin() != null) {
-                Long adminUserId = cc.getCompany().getCompanyAdmin().getId();
-                if (adminUserId != null && !companyAdminUserIds.contains(adminUserId)) {
-                    companyAdminUserIds.add(adminUserId);
-                }
-            }
-        }
-        if (companyAdminUserIds.isEmpty()) {
-            for (Company company : companyRepository.findActiveCompaniesByStatus(CompanyStatus.ACTIVE)) {
-                if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getId() != null) {
-                    if (!companyAdminUserIds.contains(company.getCompanyAdmin().getId())) {
-                        companyAdminUserIds.add(company.getCompanyAdmin().getId());
-                    }
-                }
-            }
-        }
+        notificationEventService.notifyAllActiveCompanyAdminsPushOnly(
+                "New Compliance Configured",
+                "SuperAdmin configured compliance \"" + template.getName() + "\" and it is now assigned to your company.",
+                NotificationType.COMPLIANCE_CONFIG_UPDATED,
+                "compliance_details"
+        );
 
-        if (!companyAdminUserIds.isEmpty()) {
-            notificationEventService.notifyUsersWithSave(
-                    companyAdminUserIds,
-                    "New Compliance Configured",
-                    "SuperAdmin configured a new compliance \"" + template.getName() + "\" and it is assigned to your company. Go and check accordingly.",
-                    NotificationType.COMPLIANCE_CONFIG_UPDATED,
-                    "compliance_details",
-                    UserRole.COMPANY_ADMIN.name()
-            );
-        }
-
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Configured Successfully",
                 "Compliance \"" + template.getName() + "\" details with configurations saved successfully.",
                 NotificationType.COMPLIANCE_CONFIG_UPDATED,
@@ -1057,29 +999,14 @@ public class ComplianceService {
                 "Configured sub-compliance: " + subTemplate.getName() + " and assigned to " +
                         (assignedCount > 0 ? assignedCount : "existing") + " companies", adminId);
 
-        List<Long> subCompanyAdminUserIds = new ArrayList<>();
-        if (!activeCompanies.isEmpty()) {
-            for (Company company : activeCompanies) {
-                if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getId() != null) {
-                    if (!subCompanyAdminUserIds.contains(company.getCompanyAdmin().getId())) {
-                        subCompanyAdminUserIds.add(company.getCompanyAdmin().getId());
-                    }
-                }
-            }
-        }
+        notificationEventService.notifyAllActiveCompanyAdminsPushOnly(
+                "New Sub-Compliance Configured",
+                "SuperAdmin configured sub-compliance \"" + subTemplate.getName() + "\" under \"" + subTemplate.getParentTemplate().getName() + "\" and it is now assigned to your company.",
+                NotificationType.COMPLIANCE_CONFIG_UPDATED,
+                "compliance_details"
+        );
 
-        if (!subCompanyAdminUserIds.isEmpty()) {
-            notificationEventService.notifyUsersWithSave(
-                    subCompanyAdminUserIds,
-                    "New Sub-Compliance Configured",
-                    "SuperAdmin created a new sub-compliance \"" + subTemplate.getName() + "\" under \"" + subTemplate.getParentTemplate().getName() + "\" and it is assigned to your company. Go and check accordingly.",
-                    NotificationType.COMPLIANCE_CONFIG_UPDATED,
-                    "compliance_details",
-                    UserRole.COMPANY_ADMIN.name()
-            );
-        }
-
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Sub-Compliance Configured Successfully",
                 "Sub-compliance \"" + subTemplate.getName() + "\" under \"" + subTemplate.getParentTemplate().getName() + "\" details with configurations saved successfully.",
                 NotificationType.COMPLIANCE_CONFIG_UPDATED,

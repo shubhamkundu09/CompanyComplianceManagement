@@ -54,8 +54,19 @@ public class AuthService {
         log.info("User logged in successfully: {}", request.getEmail());
 
         // Push-only login notification
-        String title = user.isSuperAdmin() ? "SuperAdmin Login" : "Company Admin Login";
-        NotificationType type = user.isSuperAdmin() ? NotificationType.SUPER_ADMIN_LOGIN : NotificationType.COMPANY_ADMIN_LOGIN;
+        String title;
+        NotificationType type;
+        if (user.isSuperAdmin()) {
+            title = "SuperAdmin Login";
+            type = NotificationType.SUPER_ADMIN_LOGIN;
+        } else if (user.isCompanyAdmin()) {
+            title = "Company Admin Login";
+            type = NotificationType.COMPANY_ADMIN_LOGIN;
+        } else {
+            title = "Employee Login";
+            type = NotificationType.EMPLOYEE_LOGIN;
+        }
+
         notificationEventService.notifyUserPushOnly(
                 user.getId(),
                 title,

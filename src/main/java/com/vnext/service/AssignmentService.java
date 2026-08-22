@@ -255,6 +255,35 @@ public class AssignmentService {
                 : (companyCompliance.getTemplate() != null ? companyCompliance.getTemplate().getName() : "Compliance");
         String companyName = companyCompliance.getCompany() != null ? companyCompliance.getCompany().getName() : "Company";
 
+        // Push to completing Company Admin
+        notificationEventService.notifyUserPushOnly(
+                adminId,
+                "Compliance Completed",
+                "You have marked compliance \"" + complianceName + "\" as completed.",
+                NotificationType.COMPLIANCE_COMPLETED,
+                "compliance_details"
+        );
+
+        // Push to all assigned employees under this compliance
+        if (config != null) {
+            List<Long> assignedEmpIds = assignmentRepository.findByConfigIdAndIsActiveTrue(config.getId())
+                    .stream()
+                    .map(EmployeeAssignment::getEmployeeId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+            if (!assignedEmpIds.isEmpty()) {
+                notificationEventService.notifyUsersPushOnly(
+                        assignedEmpIds,
+                        "Compliance Completed",
+                        "Compliance \"" + complianceName + "\" has been marked as completed by your Company Admin.",
+                        NotificationType.COMPLIANCE_COMPLETED,
+                        "employee_compliance"
+                );
+            }
+        }
+
+        // Push to SuperAdmins
         notificationEventService.notifySuperAdminsWithSave(
                 "Compliance Completed",
                 "Company " + companyName + " completed compliance \"" + complianceName + "\" and marked as completed.",
@@ -448,12 +477,16 @@ public class AssignmentService {
             }
         }
 
-        String userName = "User #" + userId;
+        String completerName = "Employee";
+        Long companyAdminId = null;
         try {
             Optional<User> userOpt = userRepository.findById(userId);
             if (userOpt.isPresent()) {
                 User user = userOpt.get();
-                userName = user.getFullName() + " (" + user.getRole().name() + ")";
+                completerName = user.getFullName();
+                if (user.getCompany() != null && user.getCompany().getCompanyAdmin() != null) {
+                    companyAdminId = user.getCompany().getCompanyAdmin().getId();
+                }
             }
         } catch (Exception e) {
             // Ignore
@@ -470,9 +503,52 @@ public class AssignmentService {
             }
             if (cc.getCompany() != null) {
                 companyName = cc.getCompany().getName();
+                if (companyAdminId == null && cc.getCompany().getCompanyAdmin() != null) {
+                    companyAdminId = cc.getCompany().getCompanyAdmin().getId();
+                }
             }
         }
 
+        // 1. Push to completing user/employee
+        notificationEventService.notifyUserPushOnly(
+                userId,
+                "Compliance Completed",
+                "You have successfully completed compliance \"" + complianceName + "\".",
+                NotificationType.COMPLIANCE_COMPLETED,
+                "employee_compliance"
+        );
+
+        // 2. Push to Company Admin (if not the one who completed it)
+        if (companyAdminId != null && !companyAdminId.equals(userId)) {
+            notificationEventService.notifyUserPushOnly(
+                    companyAdminId,
+                    "Compliance Completed",
+                    "Employee " + completerName + " completed compliance \"" + complianceName + "\".",
+                    NotificationType.COMPLIANCE_COMPLETED,
+                    "compliance_details"
+            );
+        }
+
+        // 3. Push to other employees assigned to this same compliance config
+        if (assignment.getConfig() != null) {
+            List<Long> otherAssignedEmpIds = assignmentRepository.findByConfigIdAndIsActiveTrue(assignment.getConfig().getId())
+                    .stream()
+                    .map(EmployeeAssignment::getEmployeeId)
+                    .filter(eId -> eId != null && !eId.equals(userId))
+                    .distinct()
+                    .collect(Collectors.toList());
+            if (!otherAssignedEmpIds.isEmpty()) {
+                notificationEventService.notifyUsersPushOnly(
+                        otherAssignedEmpIds,
+                        "Compliance Completed",
+                        "Compliance \"" + complianceName + "\" has been completed by " + completerName + ".",
+                        NotificationType.COMPLIANCE_COMPLETED,
+                        "employee_compliance"
+                );
+            }
+        }
+
+        // 4. Push to SuperAdmins
         notificationEventService.notifySuperAdminsWithSave(
                 "Compliance Completed",
                 "Company " + companyName + " completed compliance \"" + complianceName + "\" and marked as completed.",
