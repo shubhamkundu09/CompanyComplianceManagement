@@ -31,7 +31,7 @@ public class PushNotificationService {
                 .collect(Collectors.toList());
 
         if (realTokens.isEmpty()) {
-            log.warn("No real FCM device token registered for user {}. Total stored tokens: {}", userId, tokens.size());
+            log.warn("No real FCM device token registered for user {}. Total stored tokens: {}, Stored tokens: {}", userId, tokens.size(), tokens);
             return;
         }
         sendMulticast(realTokens, payload);
@@ -52,7 +52,7 @@ public class PushNotificationService {
                 .collect(Collectors.toList());
 
         if (realTokens.isEmpty()) {
-            log.warn("No real FCM device tokens registered for target user IDs {}. Total tokens found: {}", userIds, tokens.size());
+            log.warn("No real FCM device tokens registered for target user IDs {}. Total tokens found: {}, Stored tokens: {}", userIds, tokens.size(), tokens);
             return;
         }
         sendMulticast(realTokens, payload);

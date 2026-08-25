@@ -20,31 +20,59 @@ public class NotificationService {
 
     @Transactional
     public Notification createNotification(String title, String message, Long adminId) {
+        return createNotification(title, message, "SYSTEM_ANNOUNCEMENT", adminId);
+    }
+
+    @Transactional
+    public Notification createNotification(String title, String message, String notificationType, Long adminId) {
         Notification notification = new Notification();
         notification.setTitle(title);
         notification.setMessage(message);
         notification.setIsActive(true);
         notification.setCreatedBy(adminId);
-        notification.setNotificationType("SYSTEM_ANNOUNCEMENT");
+        notification.setNotificationType(notificationType != null && !notificationType.trim().isEmpty() ? notificationType : "SYSTEM_ANNOUNCEMENT");
         return notificationRepository.save(notification);
     }
 
+    // === FOR WEB JSP (HEADER & NOTIFICATIONS PAGE - ANNOUNCEMENTS ONLY) ===
     @Transactional(readOnly = true)
     public List<Notification> getActiveNotifications() {
-        return notificationRepository.findActiveNotifications(LocalDateTime.now());
+        return notificationRepository.findActiveAnnouncements(LocalDateTime.now());
     }
 
     @Transactional(readOnly = true)
     public List<Notification> getActiveNotificationsForRole(com.vnext.entity.UserRole role) {
         if (role == null) {
-            return notificationRepository.findActiveNotifications(LocalDateTime.now());
+            return notificationRepository.findActiveAnnouncements(LocalDateTime.now());
         }
-        return notificationRepository.findActiveNotificationsForRole(LocalDateTime.now(), role.name());
+        return notificationRepository.findActiveAnnouncementsForRole(LocalDateTime.now(), role.name());
+    }
+
+    @Transactional(readOnly = true)
+    public List<Notification> getActiveAnnouncementsForRole(com.vnext.entity.UserRole role) {
+        if (role == null) {
+            return notificationRepository.findActiveAnnouncements(LocalDateTime.now());
+        }
+        return notificationRepository.findActiveAnnouncementsForRole(LocalDateTime.now(), role.name());
     }
 
     @Transactional(readOnly = true)
     public long getActiveNotificationCount() {
         return notificationRepository.countActiveAnnouncementNotifications(LocalDateTime.now());
+    }
+
+    @Transactional(readOnly = true)
+    public long getActiveAnnouncementCount() {
+        return notificationRepository.countActiveAnnouncementNotifications(LocalDateTime.now());
+    }
+
+    // === FOR MOBILE APP POLLER (ALL EVENT NOTIFICATIONS INCL. LOGINS, CREATION, CONFIGS) ===
+    @Transactional(readOnly = true)
+    public List<Notification> getPollerNotificationsForRole(com.vnext.entity.UserRole role) {
+        if (role == null) {
+            return notificationRepository.findPollerNotifications(LocalDateTime.now());
+        }
+        return notificationRepository.findPollerNotificationsForRole(LocalDateTime.now(), role.name());
     }
 
     @Transactional

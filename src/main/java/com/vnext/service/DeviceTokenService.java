@@ -39,7 +39,7 @@ public class DeviceTokenService {
             device.setAppVersion(appVersion);
             device.setLastSeen(LocalDateTime.now());
             deviceTokenRepository.save(device);
-            log.info("Updated device token for user {}: platform={}, device={}", userId, p, deviceName);
+            log.info("Updated device token for user {}: platform={}, device={}, token={}", userId, p, deviceName, token);
             return;
         }
 
@@ -51,7 +51,7 @@ public class DeviceTokenService {
         newDevice.setAppVersion(appVersion);
         newDevice.setLastSeen(LocalDateTime.now());
         deviceTokenRepository.save(newDevice);
-        log.info("Registered new device token for user {}: platform={}, device={}", userId, p, deviceName);
+        log.info("Registered new device token for user {}: platform={}, device={}, token={}", userId, p, deviceName, token);
     }
 
     @Transactional

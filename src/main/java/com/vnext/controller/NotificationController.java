@@ -12,7 +12,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/notifications")
@@ -27,10 +26,11 @@ public class NotificationController {
     public ApiResponse<Notification> createNotification(
             @RequestParam String title,
             @RequestParam String message,
+            @RequestParam(required = false, defaultValue = "GENERAL") String notificationType,
             @CurrentUser User admin) {
 
         // Save the announcement
-        Notification notification = notificationService.createNotification(title, message, admin.getId());
+        Notification notification = notificationService.createNotification(title, message, notificationType, admin.getId());
 
         // Send push notification to all admins (SuperAdmin + CompanyAdmin)
         notificationEventService.notifyAllAdminsPushOnly(
@@ -43,21 +43,23 @@ public class NotificationController {
         return ApiResponse.success(notification, "Notification created successfully");
     }
 
-    // Get active notifications (only those stored in DB)
+    // Get active announcements only (used by JSP header bell, dropdown, and notifications page)
     @GetMapping("/active")
     public ApiResponse<List<Notification>> getActiveNotifications(@CurrentUser User user) {
         var role = user != null ? user.getRole() : null;
-        List<Notification> notifications = notificationService.getActiveNotificationsForRole(role);
+        List<Notification> notifications = notificationService.getActiveAnnouncementsForRole(role);
         return ApiResponse.success(notifications, "Active notifications retrieved");
     }
 
+    // Get all events for real-time mobile in-app poller
     @GetMapping("/poller")
     public ApiResponse<List<Notification>> getPollerNotifications(@CurrentUser User user) {
         var role = user != null ? user.getRole() : null;
-        List<Notification> notifications = notificationService.getActiveNotificationsForRole(role);
+        List<Notification> notifications = notificationService.getPollerNotificationsForRole(role);
         return ApiResponse.success(notifications, "Poller notifications retrieved");
     }
 
+    // Get active announcement count for header badge
     @GetMapping("/count")
     public ApiResponse<Long> getActiveNotificationCount() {
         long count = notificationService.getActiveNotificationCount();

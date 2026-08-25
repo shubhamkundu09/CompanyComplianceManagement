@@ -150,7 +150,7 @@ public class EmployeeService {
 
         log.info("Employee created successfully with ID: {} and code: {}", savedEmployee.getId(), employeeCode);
 
-        // Push notification to Company Admin
+        // Push notification to Company Admin and SuperAdmins
         if (company.getCompanyAdmin() != null) {
             notificationEventService.notifyUserPushOnly(
                     company.getCompanyAdmin().getId(),
@@ -160,6 +160,13 @@ public class EmployeeService {
                     "employees"
             );
         }
+
+        notificationEventService.notifySuperAdminsWithSave(
+                "Employee Created",
+                "Employee " + savedEmployee.getFullName() + " has been added to " + company.getName() + ".",
+                NotificationType.EMPLOYEE_CREATED,
+                "employees"
+        );
 
         return convertToDTO(savedEmployee);
     }
@@ -248,7 +255,7 @@ public class EmployeeService {
             companyService.updateActiveEmployeeCount(companyId);
         }
 
-        // Push notification to Company Admin
+        // Push notification to Company Admin and SuperAdmins
         if (employee.getCompany() != null && employee.getCompany().getCompanyAdmin() != null) {
             notificationEventService.notifyUserPushOnly(
                     employee.getCompany().getCompanyAdmin().getId(),
@@ -258,6 +265,13 @@ public class EmployeeService {
                     "employees"
             );
         }
+
+        notificationEventService.notifySuperAdminsWithSave(
+                "Employee Removed",
+                "Employee " + employee.getFullName() + " has been removed from " + (employee.getCompany() != null ? employee.getCompany().getName() : "company") + ".",
+                NotificationType.EMPLOYEE_DELETED,
+                "employees"
+        );
 
         log.info("Employee deleted successfully with ID: {}", employeeId);
     }

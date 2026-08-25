@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -53,27 +54,38 @@ public class AuthService {
 
         log.info("User logged in successfully: {}", request.getEmail());
 
-        // Push-only login notification
+        // Push-only login notification to ALL relevant admins (cross-device)
         String title;
+        String body;
         NotificationType type;
         if (user.isSuperAdmin()) {
             title = "SuperAdmin Login";
+            body = "SuperAdmin account (" + user.getEmail() + ") logged in successfully.";
             type = NotificationType.SUPER_ADMIN_LOGIN;
+            // Notify ALL SuperAdmins (all devices where any SuperAdmin is logged in)
+            notificationEventService.notifySuperAdminsWithSave(
+                    title, body, type, "dashboard"
+            );
         } else if (user.isCompanyAdmin()) {
             title = "Company Admin Login";
+            body = "Company Admin account (" + user.getEmail() + ") logged in successfully.";
             type = NotificationType.COMPANY_ADMIN_LOGIN;
+            // Notify all SuperAdmins + this user's own devices
+            notificationEventService.notifySuperAdminsWithSave(
+                    title, body, type, "dashboard"
+            );
+            notificationEventService.notifyUserPushOnly(
+                    user.getId(), title, body, type, "dashboard"
+            );
         } else {
             title = "Employee Login";
+            body = "Employee account (" + user.getEmail() + ") logged in successfully.";
             type = NotificationType.EMPLOYEE_LOGIN;
+            // Notify just this employee's own devices
+            notificationEventService.notifyUserPushOnly(
+                    user.getId(), title, body, type, "dashboard"
+            );
         }
-
-        notificationEventService.notifyUserPushOnly(
-                user.getId(),
-                title,
-                "You have successfully logged in.",
-                type,
-                "dashboard"
-        );
         return new AuthResponse(accessToken, refreshToken, "Bearer", 86400000L, userDTO);
     }
 

@@ -12,12 +12,20 @@ import java.util.List;
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
 
-    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.notificationType = 'SYSTEM_ANNOUNCEMENT' OR n.notificationType = 'ANNOUNCEMENT' OR n.notificationType = 'GENERAL') ORDER BY n.id DESC")
-    List<Notification> findActiveNotifications(@Param("now") LocalDateTime now);
+    // === FOR WEB JSP (HEADER & NOTIFICATIONS PAGE - SUPERADMIN ANNOUNCEMENTS ONLY) ===
+    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.notificationType IN ('SYSTEM_ANNOUNCEMENT', 'ANNOUNCEMENT', 'GENERAL', 'IMPORTANT', 'URGENT', 'CUSTOM') OR n.createdBy IS NOT NULL) ORDER BY n.id DESC")
+    List<Notification> findActiveAnnouncements(@Param("now") LocalDateTime now);
 
-    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.targetRole IS NULL OR n.targetRole = :role) AND (n.notificationType = 'SYSTEM_ANNOUNCEMENT' OR n.notificationType = 'ANNOUNCEMENT' OR n.notificationType = 'GENERAL') ORDER BY n.id DESC")
-    List<Notification> findActiveNotificationsForRole(@Param("now") LocalDateTime now, @Param("role") String role);
+    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.targetRole IS NULL OR n.targetRole = :role) AND (n.notificationType IN ('SYSTEM_ANNOUNCEMENT', 'ANNOUNCEMENT', 'GENERAL', 'IMPORTANT', 'URGENT', 'CUSTOM') OR n.createdBy IS NOT NULL) ORDER BY n.id DESC")
+    List<Notification> findActiveAnnouncementsForRole(@Param("now") LocalDateTime now, @Param("role") String role);
 
-    @Query("SELECT COUNT(n) FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.notificationType = 'SYSTEM_ANNOUNCEMENT' OR n.notificationType = 'ANNOUNCEMENT' OR n.notificationType = 'GENERAL')")
+    @Query("SELECT COUNT(n) FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.notificationType IN ('SYSTEM_ANNOUNCEMENT', 'ANNOUNCEMENT', 'GENERAL', 'IMPORTANT', 'URGENT', 'CUSTOM') OR n.createdBy IS NOT NULL)")
     long countActiveAnnouncementNotifications(@Param("now") LocalDateTime now);
+
+    // === FOR REAL-TIME MOBILE APP POLLER (ALL EVENT NOTIFICATIONS INCL. LOGINS, CREATION, CONFIGS) ===
+    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) ORDER BY n.id DESC")
+    List<Notification> findPollerNotifications(@Param("now") LocalDateTime now);
+
+    @Query("SELECT n FROM Notification n WHERE n.isActive = true AND (n.expiresAt IS NULL OR n.expiresAt > :now) AND (n.targetRole IS NULL OR n.targetRole = :role) ORDER BY n.id DESC")
+    List<Notification> findPollerNotificationsForRole(@Param("now") LocalDateTime now, @Param("role") String role);
 }

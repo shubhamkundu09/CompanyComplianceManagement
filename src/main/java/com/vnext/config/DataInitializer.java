@@ -32,6 +32,7 @@ public class DataInitializer implements CommandLineRunner {
     @Value("${superadmin.last-name}")
     private String superAdminLastName;
 
+
     @Override
     @Transactional
     public void run(String... args) {

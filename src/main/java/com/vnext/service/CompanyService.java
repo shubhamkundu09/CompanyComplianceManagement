@@ -143,7 +143,7 @@ public class CompanyService {
 
         log.info("Company created successfully with ID: {}", savedCompany.getId());
         // Push-only to SuperAdmins
-        notificationEventService.notifySuperAdminsPushOnly(
+        notificationEventService.notifySuperAdminsWithSave(
                 "Company Created",
                 "Company " + savedCompany.getName() + " has been created.",
                 NotificationType.COMPANY_CREATED,
@@ -248,7 +248,7 @@ public class CompanyService {
 
         Company updatedCompany = companyRepository.save(company);
         log.info("Company updated successfully with ID: {}", updatedCompany.getId());
-        notificationEventService.notifySuperAdminsPushOnly(
+        notificationEventService.notifySuperAdminsWithSave(
                 "Company Updated",
                 "Company " + company.getName() + " has been updated.",
                 NotificationType.COMPANY_UPDATED,
@@ -358,7 +358,7 @@ public class CompanyService {
         // 6. Finally, delete the Company
         companyRepository.delete(company);
 
-        notificationEventService.notifySuperAdminsPushOnly(
+        notificationEventService.notifySuperAdminsWithSave(
                 "Company Deleted",
                 "Company " + company.getName() + " has been permanently deleted.",
                 NotificationType.COMPANY_DELETED,
@@ -391,7 +391,7 @@ public class CompanyService {
         Company updatedCompany = companyRepository.save(company);
 
         String statusText = status == CompanyStatus.ACTIVE ? "activated" : "deactivated";
-        notificationEventService.notifySuperAdminsPushOnly(
+        notificationEventService.notifySuperAdminsWithSave(
                 "Company Status Changed",
                 "Company " + company.getName() + " has been " + statusText + ".",
                 NotificationType.COMPANY_STATUS_CHANGED,
@@ -630,7 +630,7 @@ public class CompanyService {
         log.info("Subscription extended for company {}", companyId);
 
 
-        notificationEventService.notifySuperAdminsPushOnly(
+        notificationEventService.notifySuperAdminsWithSave(
                 "Subscription Extended",
                 "Subscription for " + company.getName() + " extended by " + additionalMonths + " months.",
                 NotificationType.SUBSCRIPTION_EXTENDED,

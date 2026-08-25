@@ -143,7 +143,7 @@ public class SchedulerService {
         }
     }
 
-    // ─── 2. OVERDUE EMPLOYEE COMPLIANCES (Push Notifications) ──────────────
+    // ─── 2. OVERDUE EMPLOYEE COMPLIANCES (Push Notifications to SuperAdmin, CompanyAdmin & Employee) ──────────────
     @Scheduled(cron = "0 30 8 * * *") // daily at 08:30
     @Transactional
     public void checkOverdueEmployeeCompliances() {
@@ -171,7 +171,7 @@ public class SchedulerService {
             Long companyId = getCompanyIdFromAssignment(assignment);
             String companyName = getCompanyNameFromAssignment(assignment);
 
-            // 1. Push to employee
+            // 1. Push to assigned employee
             notificationEventService.notifyUserPushOnly(
                     assignment.getEmployeeId(),
                     "Compliance Overdue",
@@ -195,8 +195,8 @@ public class SchedulerService {
                 }
             }
 
-            // 3. Push to SuperAdmins
-            notificationEventService.notifySuperAdminsPushOnly(
+            // 3. Push to all SuperAdmins
+            notificationEventService.notifySuperAdminsWithSave(
                     "Compliance Overdue",
                     "Company " + companyName + " is overdue on compliance \"" + complianceName + "\" (Employee: " + employeeName + ").",
                     NotificationType.COMPLIANCE_OVERDUE,
@@ -212,7 +212,7 @@ public class SchedulerService {
         log.info("Overdue employee notifications sent for {} assignments.", overdueAssignments.size());
     }
 
-    // ─── 3. DUE REMINDERS (Push Notifications - 3x Daily) ───────────────────
+    // ─── 3. DUE REMINDERS (Push Notifications to CompanyAdmin & Assigned Employees) ───────────────────
     @Scheduled(cron = "0 0 9,14,19 * * *") // 3 times daily at 09:00, 14:00, 19:00
     @Transactional
     public void sendDueReminders() {
@@ -238,11 +238,18 @@ public class SchedulerService {
 
             int reminderDays = config.getReminderDaysBefore() != null ? config.getReminderDaysBefore() : 10;
             int intervalDays = (config.getReminderIntervalDays() != null && config.getReminderIntervalDays() > 0) ? config.getReminderIntervalDays() : 3;
+            boolean repeat = config.getRepeatReminder() == null || Boolean.TRUE.equals(config.getRepeatReminder());
             long daysRemaining = ChronoUnit.DAYS.between(today, dueDate);
 
-            // Check if today falls on the reminder schedule (e.g. 10 days before, then every 3 days: 10, 7, 4, 1)
-            boolean shouldSend = (daysRemaining == reminderDays) ||
-                    (daysRemaining < reminderDays && (reminderDays - daysRemaining) % intervalDays == 0);
+            // Check if today falls on reminder schedule
+            boolean shouldSend = false;
+            if (daysRemaining <= reminderDays) {
+                if (repeat) {
+                    shouldSend = (daysRemaining == reminderDays) || ((reminderDays - daysRemaining) % intervalDays == 0) || (daysRemaining == 1);
+                } else {
+                    shouldSend = (daysRemaining == reminderDays) || (daysRemaining == 1);
+                }
+            }
 
             if (shouldSend) {
                 String complianceName = getComplianceName(assignment);
@@ -281,7 +288,7 @@ public class SchedulerService {
         log.info("Due reminders processed successfully.");
     }
 
-    // ─── 4. OVERDUE COMPANY COMPLIANCES (Email to SuperAdmin) ──────────────
+    // ─── 4. OVERDUE COMPANY COMPLIANCES (Email & Push to SuperAdmin & Company Admin) ──────────────
     @Scheduled(cron = "0 0 9 * * *") // daily at 09:00
     @Transactional
     public void checkOverdueCompanyCompliances() {
@@ -306,18 +313,40 @@ public class SchedulerService {
             return;
         }
 
-        // Build email content
+        // Build email content and send FCM notifications
         List<EmailService.OverdueComplianceInfo> overdueList = new ArrayList<>();
         for (CompanyCompliance cc : overdueCCs) {
-            EmailService.OverdueComplianceInfo info = new EmailService.OverdueComplianceInfo();
-            info.setCompanyName(cc.getCompany().getName());
-            info.setComplianceName(cc.getTemplate().getName());
-            info.setSubComplianceName(cc.getSubTemplate() != null ? cc.getSubTemplate().getName() : null);
+            String complianceTitle = cc.getSubTemplate() != null ? cc.getSubTemplate().getName() : (cc.getTemplate() != null ? cc.getTemplate().getName() : "Compliance");
+            String companyName = cc.getCompany() != null ? cc.getCompany().getName() : "Company";
             LocalDate due = complianceService.calculateEffectiveDueDate(cc.getConfig());
+
+            EmailService.OverdueComplianceInfo info = new EmailService.OverdueComplianceInfo();
+            info.setCompanyName(companyName);
+            info.setComplianceName(cc.getTemplate() != null ? cc.getTemplate().getName() : complianceTitle);
+            info.setSubComplianceName(cc.getSubTemplate() != null ? cc.getSubTemplate().getName() : null);
             info.setDueDate(due);
-            info.setOverdueDays((int) ChronoUnit.DAYS.between(due, today));
+            info.setOverdueDays(due != null ? (int) ChronoUnit.DAYS.between(due, today) : 0);
             info.setAssignedTo("Company Admin");
             overdueList.add(info);
+
+            // Push to Company Admin
+            if (cc.getCompany() != null && cc.getCompany().getCompanyAdmin() != null) {
+                notificationEventService.notifyUserPushOnly(
+                        cc.getCompany().getCompanyAdmin().getId(),
+                        "Compliance Overdue",
+                        "Your company compliance \"" + complianceTitle + "\" is overdue.",
+                        NotificationType.COMPLIANCE_OVERDUE,
+                        "compliance_details"
+                );
+            }
+
+            // Push to SuperAdmins
+            notificationEventService.notifySuperAdminsWithSave(
+                    "Company Compliance Overdue",
+                    "Company " + companyName + " has overdue compliance \"" + complianceTitle + "\".",
+                    NotificationType.COMPLIANCE_OVERDUE,
+                    "compliance_details"
+            );
         }
 
         // Send email to SuperAdmin
