@@ -153,8 +153,18 @@ public class SuperAdminController {
     @PatchMapping("/companies/{companyId}/status")
     public ApiResponse<CompanyResponseDTO> updateCompanyStatus(
             @PathVariable Long companyId,
-            @RequestParam CompanyStatus status) {
-        CompanyResponseDTO company = companyService.updateCompanyStatus(companyId, status);
+            @RequestParam String status) {
+        CompanyStatus statusEnum;
+        try {
+            statusEnum = CompanyStatus.valueOf(status.trim().toUpperCase());
+        } catch (Exception e) {
+            statusEnum = ("INACTIVE".equalsIgnoreCase(status) || "DEACTIVATED".equalsIgnoreCase(status))
+                    ? CompanyStatus.DEACTIVATED : CompanyStatus.ACTIVE;
+        }
+        if (statusEnum == CompanyStatus.INACTIVE) {
+            statusEnum = CompanyStatus.DEACTIVATED;
+        }
+        CompanyResponseDTO company = companyService.updateCompanyStatus(companyId, statusEnum);
         return ApiResponse.success(company, "Company status updated successfully");
     }
 

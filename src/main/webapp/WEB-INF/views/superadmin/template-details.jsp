@@ -1834,7 +1834,7 @@
                     </div>
                 </div>
 
-                <div style="margin-bottom:16px;">
+                <div id="configReminderDaysSection" style="margin-bottom:16px;">
                     <label class="form-label">Reminder Days Before</label>
                     <select id="configReminderDays" class="form-input">
                         <option value="1">1 day before</option>
@@ -1848,7 +1848,7 @@
                     </select>
                 </div>
 
-                <div style="margin-bottom:16px;">
+                <div id="configRepeatReminderSection" style="margin-bottom:16px;">
                     <label class="form-label">Repeat Reminder Until Completed</label>
                     <select id="configRepeatReminder" class="form-input">
                         <option value="true">Yes</option>
@@ -1991,9 +1991,16 @@
     function formatDate(d) {
         if (!d) return "—";
         try {
-            var date = new Date(d);
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+            }
+            var date = new Date(str);
             if (isNaN(date.getTime())) return "—";
             return date.toLocaleDateString("en-IN", {
+                timeZone: "Asia/Kolkata",
                 day: "2-digit",
                 month: "short",
                 year: "numeric"
@@ -2006,9 +2013,23 @@
     function formatDateTime(d) {
         if (!d) return '—';
         try {
-            var date = new Date(d);
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var date = new Date(str);
             if (isNaN(date.getTime())) return '—';
-            return date.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            return date.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
         } catch(e) {
             return '—';
         }
@@ -3142,10 +3163,17 @@
            document.getElementById(sections[i]).style.display = "none";
        }
 
-       // Always show reminder sections (don't hide them even if frequency is empty)
-       document.getElementById('configReminderDays').style.display = 'block';
-       document.getElementById('configRepeatReminder').style.display = 'block';
-       document.getElementById('configIntervalSection').style.display = 'block';
+       // Show/hide reminder sections based on whether frequency is set
+       var hasFreq = frequency && frequency !== "";
+       var reminderDaysSec = document.getElementById('configReminderDaysSection');
+       if (reminderDaysSec) reminderDaysSec.style.display = hasFreq ? 'block' : 'none';
+       var repeatReminderSec = document.getElementById('configRepeatReminderSection');
+       if (repeatReminderSec) repeatReminderSec.style.display = hasFreq ? 'block' : 'none';
+       var intervalSec = document.getElementById('configIntervalSection');
+       if (intervalSec) {
+           var repeatVal = document.getElementById('configRepeatReminder').value;
+           intervalSec.style.display = (hasFreq && repeatVal === 'true') ? 'block' : 'none';
+       }
 
        // Show due‑date sections based on frequency
        if (frequency === "ONE_TIME") {
@@ -3159,7 +3187,6 @@
        } else if (frequency === "YEARLY") {
            document.getElementById("configYearlySection").style.display = "block";
        }
-       // If frequency is empty/null, don't show any due-date section but reminder sections stay visible
    }
 
   async function saveConfig() {

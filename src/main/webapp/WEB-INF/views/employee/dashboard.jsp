@@ -1151,16 +1151,38 @@
     function formatDate(d) {
         if (!d) return 'N/A';
         try {
-            const dt = new Date(d);
-            return dt.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var dt = new Date(str);
+            if (isNaN(dt.getTime())) return d;
+            return dt.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
         } catch(e) { return d; }
     }
 
     function formatDateTime(dtStr) {
         if (!dtStr) return 'N/A';
         try {
-            const dt = new Date(dtStr);
-            return dt.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            var str = String(dtStr).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var dt = new Date(str);
+            if (isNaN(dt.getTime())) return dtStr;
+            return dt.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
         } catch(e) { return dtStr; }
     }
 

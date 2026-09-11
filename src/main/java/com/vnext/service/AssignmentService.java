@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -23,6 +24,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class AssignmentService {
+
+    public static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final EmployeeAssignmentRepository assignmentRepository;
     private final ComplianceConfigRepository configRepository;
@@ -78,12 +81,12 @@ public class AssignmentService {
                         subAssign.setConfig(subConfig);
                         subAssign.setEmployeeId(employeeId);
                         subAssign.setDueDate(subConfig.getDueDate() != null ? subConfig.getDueDate() : parentAssign.getDueDate());
-                        subAssign.setAssignedAt(LocalDateTime.now());
+                        subAssign.setAssignedAt(LocalDateTime.now(IST_ZONE));
                         subAssign.setIsActive(true);
                         subAssign.setIsSubAssignment(true);
                         subAssign.setParentAssignmentId(parentAssign.getId());
                         if (subCC.getStatus() == ComplianceStatus.COMPLETED || subCC.getCompletedAt() != null) {
-                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now(IST_ZONE));
                             subAssign.setCompletedBy(subCC.getCompletedBy());
                             subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
                             subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
@@ -172,11 +175,11 @@ public class AssignmentService {
 
         // Validate that this compliance/sub-compliance is configured first
         ComplianceConfig config = configRepository.findByCompanyComplianceId(companyCompliance.getId()).orElse(null);
-        if (config == null || (config.getFrequency() == null && config.getDueDate() == null && config.getCustomDueDate() == null)) {
+        if (config == null) {
             throw new BusinessException("Please configure this sub-compliance first before marking it as complete.");
         }
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(IST_ZONE);
 
         // Save admin submission data on CompanyCompliance
         companyCompliance.setStatus(ComplianceStatus.COMPLETED);
@@ -393,7 +396,7 @@ public class AssignmentService {
             throw new BusinessException("This compliance is already marked as completed");
         }
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(IST_ZONE);
 
         // 1. Mark ALL employee assignments for this specific config as completed so all assigned employees see it
         Long configId = (config != null) ? config.getId() : null;
@@ -723,7 +726,7 @@ public class AssignmentService {
             }
             history.setAction(action);
             history.setRemarks(remarks);
-            history.setPerformedAt(LocalDateTime.now());
+            history.setPerformedAt(LocalDateTime.now(IST_ZONE));
 
             userRepository.findById(performedBy).ifPresent(history::setPerformedBy);
 

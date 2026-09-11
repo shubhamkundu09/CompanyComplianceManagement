@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,6 +21,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class SchedulerService {
+
+    public static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final EmployeeAssignmentRepository assignmentRepository;
     private final UserRepository userRepository;
@@ -31,12 +34,12 @@ public class SchedulerService {
     private final CompanyRepository companyRepository;
 
     // ─── 1. RECURRING COMPLIANCE RENEWAL ──────────────────────────────────────
-    @Scheduled(cron = "0 5 0 * * *") // daily at 00:05
+    @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Kolkata") // daily at 00:05 IST
     @Transactional
     public void renewCompletedRecurringCompliances() {
         log.info("Running recurring compliance renewal check...");
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(IST_ZONE);
 
         // Find all completed recurring compliances
         List<CompanyCompliance> completedRecurring = companyComplianceRepository.findAll().stream()
@@ -91,7 +94,7 @@ public class SchedulerService {
             // Update config due date
             config.setDueDate(nextDueDate);
             config.setCustomDueDate(nextDueDate);
-            config.setUpdatedAt(LocalDateTime.now());
+            config.setUpdatedAt(LocalDateTime.now(IST_ZONE));
             configRepository.save(config);
 
             // Reset company compliance status
@@ -126,7 +129,7 @@ public class SchedulerService {
                     newAssign.setConfig(config);
                     newAssign.setEmployeeId(emp.getId());
                     newAssign.setDueDate(nextDueDate);
-                    newAssign.setAssignedAt(LocalDateTime.now());
+                    newAssign.setAssignedAt(LocalDateTime.now(IST_ZONE));
                     newAssign.setIsActive(true);
                     newAssign.setIsSubAssignment(cc.isSubCompliance());
                     if (cc.isSubCompliance() && cc.getParentTemplateId() != null) {
@@ -144,11 +147,11 @@ public class SchedulerService {
     }
 
     // ─── 2. OVERDUE EMPLOYEE COMPLIANCES (Push Notifications to SuperAdmin, CompanyAdmin & Employee) ──────────────
-    @Scheduled(cron = "0 30 8 * * *") // daily at 08:30
+    @Scheduled(cron = "0 30 8 * * *", zone = "Asia/Kolkata") // daily at 08:30 IST
     @Transactional
     public void checkOverdueEmployeeCompliances() {
         log.info("Checking overdue employee compliances...");
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(IST_ZONE);
 
         List<EmployeeAssignment> overdueAssignments = assignmentRepository
                 .findByDueDateBeforeAndCompletedAtIsNullAndIsActiveTrue(today);
@@ -204,7 +207,7 @@ public class SchedulerService {
             );
 
             // Mark as notified
-            assignment.setOverdueNotifiedAt(LocalDateTime.now());
+            assignment.setOverdueNotifiedAt(LocalDateTime.now(IST_ZONE));
             assignment.setIsOverdue(true);
             assignmentRepository.save(assignment);
         }
@@ -213,11 +216,11 @@ public class SchedulerService {
     }
 
     // ─── 3. DUE REMINDERS (Push Notifications to CompanyAdmin & Assigned Employees) ───────────────────
-    @Scheduled(cron = "0 0 9,14,19 * * *") // 3 times daily at 09:00, 14:00, 19:00
+    @Scheduled(cron = "0 0 9,14,19 * * *", zone = "Asia/Kolkata") // 3 times daily at 09:00, 14:00, 19:00 IST
     @Transactional
     public void sendDueReminders() {
         log.info("Checking due reminders (3x daily schedule)...");
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(IST_ZONE);
         LocalDate future = today.plusDays(60);
 
         List<EmployeeAssignment> upcomingAssignments = assignmentRepository

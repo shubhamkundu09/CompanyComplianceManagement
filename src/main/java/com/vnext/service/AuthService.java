@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 @Service
@@ -26,10 +27,13 @@ import java.util.List;
 @Slf4j
 public class AuthService {
 
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
     private final UserRepository userRepository;
     private final NotificationEventService notificationEventService;
+    private final DeviceTokenService deviceTokenService;
 
     @Transactional
     public AuthResponse login(AuthRequest request) {
@@ -40,10 +44,8 @@ public class AuthService {
         );
 
         User user = (User) authentication.getPrincipal();
-        user.setLastLoginAt(LocalDateTime.now());
+        user.setLastLoginAt(LocalDateTime.now(IST_ZONE));
         userRepository.save(user);
-
-
 
         // Generate tokens
         String accessToken = jwtService.generateToken(user);
@@ -54,38 +56,40 @@ public class AuthService {
 
         log.info("User logged in successfully: {}", request.getEmail());
 
-        // Push-only login notification to ALL relevant admins (cross-device)
+        // Multi-device login notifications: strictly isolated to this user's other active devices
         String title;
         String body;
         NotificationType type;
         if (user.isSuperAdmin()) {
             title = "SuperAdmin Login";
-            body = "SuperAdmin account (" + user.getEmail() + ") logged in successfully.";
+            body = "SUPER_ADMIN logged in successfully";
             type = NotificationType.SUPER_ADMIN_LOGIN;
-            // Notify ALL SuperAdmins (all devices where any SuperAdmin is logged in)
-            notificationEventService.notifySuperAdminsWithSave(
-                    title, body, type, "dashboard"
-            );
         } else if (user.isCompanyAdmin()) {
             title = "Company Admin Login";
-            body = "Company Admin account (" + user.getEmail() + ") logged in successfully.";
+            body = "Company Admin logged in successfully";
             type = NotificationType.COMPANY_ADMIN_LOGIN;
-            // Notify all SuperAdmins + this user's own devices
-            notificationEventService.notifySuperAdminsWithSave(
-                    title, body, type, "dashboard"
-            );
-            notificationEventService.notifyUserPushOnly(
-                    user.getId(), title, body, type, "dashboard"
-            );
         } else {
             title = "Employee Login";
-            body = "Employee account (" + user.getEmail() + ") logged in successfully.";
+            body = "Employee logged in successfully";
             type = NotificationType.EMPLOYEE_LOGIN;
-            // Notify just this employee's own devices
-            notificationEventService.notifyUserPushOnly(
-                    user.getId(), title, body, type, "dashboard"
+        }
+
+        // 1. Send push notification to this user's OTHER active devices (excluding the newly logged-in device)
+        notificationEventService.notifyUserOtherDevicesPushOnly(
+                user.getId(), request.getDeviceToken(), title, body, type, "dashboard"
+        );
+
+        // 2. Register/update current device token for this user if provided in the login request
+        if (request.getDeviceToken() != null && !request.getDeviceToken().trim().isEmpty()) {
+            deviceTokenService.registerDeviceToken(
+                    user.getId(),
+                    request.getDeviceToken().trim(),
+                    request.getPlatform(),
+                    request.getDeviceName(),
+                    request.getAppVersion()
             );
         }
+
         return new AuthResponse(accessToken, refreshToken, "Bearer", 86400000L, userDTO);
     }
 

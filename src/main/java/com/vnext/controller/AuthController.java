@@ -16,7 +16,13 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/login")
-    public ApiResponse<AuthResponse> login(@Valid @RequestBody AuthRequest request) {
+    public ApiResponse<AuthResponse> login(
+            @Valid @RequestBody AuthRequest request,
+            @RequestHeader(value = "X-Device-Token", required = false) String headerDeviceToken) {
+        if ((request.getDeviceToken() == null || request.getDeviceToken().trim().isEmpty())
+                && headerDeviceToken != null && !headerDeviceToken.trim().isEmpty()) {
+            request.setDeviceToken(headerDeviceToken.trim());
+        }
         AuthResponse response = authService.login(request);
         return ApiResponse.success(response, "Login successful");
     }

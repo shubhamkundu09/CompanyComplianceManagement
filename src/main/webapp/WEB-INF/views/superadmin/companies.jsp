@@ -1407,6 +1407,111 @@
     </div>
 </div>
 
+<!-- ==================== EDIT COMPANY MODAL ==================== -->
+<div id="editModal" class="modal-overlay">
+    <div class="modal-box">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title"><i class="fas fa-edit" style="color:var(--primary);margin-right:8px;"></i>Edit Company</div>
+                <div class="modal-subtitle">Update company details and view admin account</div>
+            </div>
+            <button class="modal-close" onclick="closeEditModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <!-- Company Information -->
+            <div style="margin-bottom:20px;">
+                <div class="modal-section-title">
+                    <i class="fas fa-building"></i>Company Information
+                </div>
+                <div class="grid-2">
+                    <div>
+                        <label class="form-label">Company Name <span style="color:var(--danger);">*</span></label>
+                        <input type="text" id="edit_name" class="form-input" placeholder="Acme Corp">
+                    </div>
+                    <div>
+                        <label class="form-label">Company Email <span style="color:var(--danger);">*</span></label>
+                        <input type="email" id="edit_email" class="form-input" placeholder="contact@company.com">
+                    </div>
+                    <div>
+                        <label class="form-label">Phone</label>
+                        <input type="text" id="edit_phone" class="form-input" placeholder="9876543210">
+                    </div>
+                    <div>
+                        <label class="form-label">Website</label>
+                        <input type="text" id="edit_website" class="form-input" placeholder="https://company.com">
+                    </div>
+                    <div>
+                        <label class="form-label">GST Number</label>
+                        <input type="text" id="edit_gst" class="form-input" placeholder="22AAAAA0000A1Z5" style="text-transform:uppercase;">
+                    </div>
+                    <div>
+                        <label class="form-label">PAN Number</label>
+                        <input type="text" id="edit_pan" class="form-input" placeholder="ABCDE1234F" style="text-transform:uppercase;">
+                    </div>
+                    <div class="col-2">
+                        <label class="form-label">Address</label>
+                        <textarea id="edit_address" class="form-input" rows="2" placeholder="Street, Area…"></textarea>
+                    </div>
+                    <div>
+                        <label class="form-label">City</label>
+                        <input type="text" id="edit_city" class="form-input" placeholder="Mumbai">
+                    </div>
+                    <div>
+                        <label class="form-label">State</label>
+                        <input type="text" id="edit_state" class="form-input" placeholder="Maharashtra">
+                    </div>
+                    <div>
+                        <label class="form-label">Country</label>
+                        <input type="text" id="edit_country" class="form-input" placeholder="India">
+                    </div>
+                    <div>
+                        <label class="form-label">Postal Code</label>
+                        <input type="text" id="edit_postal" class="form-input" placeholder="400001">
+                    </div>
+                    <div>
+                        <label class="form-label">User Limit</label>
+                        <input type="number" id="edit_limit" class="form-input" value="100" min="1">
+                    </div>
+                    <div class="col-2">
+                        <label class="form-label">Description</label>
+                        <textarea id="edit_desc" class="form-input" rows="2" placeholder="Brief description…"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Account (Read Only) -->
+            <div>
+                <div class="modal-section-title" style="display:flex;align-items:center;justify-content:space-between;">
+                    <span><i class="fas fa-user-shield"></i>Company Admin Account</span>
+                    <span style="font-size:10px;font-weight:600;background:rgba(100,116,139,0.15);color:var(--gray-600);padding:2px 8px;border-radius:10px;letter-spacing:0.5px;text-transform:uppercase;">Read-only</span>
+                </div>
+                <div class="grid-2">
+                    <div>
+                        <label class="form-label">First Name</label>
+                        <input type="text" id="edit_adminFirst" class="form-input" readonly disabled style="background:var(--bg);cursor:not-allowed;color:var(--gray-600);">
+                    </div>
+                    <div>
+                        <label class="form-label">Last Name</label>
+                        <input type="text" id="edit_adminLast" class="form-input" readonly disabled style="background:var(--bg);cursor:not-allowed;color:var(--gray-600);">
+                    </div>
+                    <div class="col-2">
+                        <label class="form-label">Admin Email</label>
+                        <input type="email" id="edit_adminEmail" class="form-input" readonly disabled style="background:var(--bg);cursor:not-allowed;color:var(--gray-600);">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeEditModal()" class="btn btn-ghost">Cancel</button>
+            <button onclick="submitEditCompany()" class="btn btn-primary" id="editSubmitBtn">
+                <i class="fas fa-save"></i> Save Changes
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
     var contextPath = '${baseUrl}';
     var currentPage = 0;
@@ -1470,12 +1575,40 @@
 
     function formatDate(d) {
         if (!d) return '—';
-        return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        try {
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var date = new Date(str);
+            if (isNaN(date.getTime())) return '—';
+            return date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
+        } catch(e) { return '—'; }
     }
 
     function formatDateTime(d) {
         if (!d) return '—';
-        return new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        try {
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var date = new Date(str);
+            if (isNaN(date.getTime())) return '—';
+            return date.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
+        } catch(e) { return '—'; }
     }
 
     // ==================== SIDEBAR ====================
@@ -1656,6 +1789,7 @@
                 '<td style="text-align:center;">' +
                     '<div style="display:flex;gap:4px;justify-content:center;">' +
                         '<button onclick="viewCompany(' + c.id + ')" class="btn btn-ghost" style="padding:5px 8px;" title="View"><i class="fas fa-eye" style="font-size:12px;"></i></button>' +
+                        '<button onclick="openEditCompanyModal(' + c.id + ')" class="btn btn-ghost" style="padding:5px 8px;color:var(--primary);" title="Edit"><i class="fas fa-edit" style="font-size:12px;"></i></button>' +
                         '<button onclick="toggleStatus(' + c.id + ',\'' + c.status + '\')" class="btn ' + (isActive ? 'btn-danger' : 'btn-success') + '" style="padding:5px 8px;" title="' + (isActive ? 'Deactivate' : 'Activate') + '">' +
                             '<i class="fas ' + (isActive ? 'fa-ban' : 'fa-check') + '" style="font-size:12px;"></i>' +
                         '</button>' +
@@ -1865,9 +1999,111 @@
         btn.innerHTML = '<i class="fas fa-plus"></i> Create Company';
     }
 
+    // ==================== EDIT COMPANY MODAL ====================
+    var currentEditCompanyId = null;
+
+    async function openEditCompanyModal(id) {
+        currentEditCompanyId = id;
+        document.getElementById('editModal').style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+
+        var btn = document.getElementById('editSubmitBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading…';
+
+        var res = await api('/api/super-admin/companies/' + id);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
+
+        if (!res || !res.success || !res.data) {
+            toast('Failed to load company details', 'error');
+            closeEditModal();
+            return;
+        }
+
+        var c = res.data;
+        var admin = c.companyAdmin || {};
+
+        document.getElementById('edit_name').value = c.name || '';
+        document.getElementById('edit_email').value = c.email || '';
+        document.getElementById('edit_phone').value = c.phone || '';
+        document.getElementById('edit_website').value = c.website || '';
+        document.getElementById('edit_gst').value = c.gstNumber || '';
+        document.getElementById('edit_pan').value = c.panNumber || '';
+        document.getElementById('edit_address').value = c.address || '';
+        document.getElementById('edit_city').value = c.city || '';
+        document.getElementById('edit_state').value = c.state || '';
+        document.getElementById('edit_country').value = c.country || 'India';
+        document.getElementById('edit_postal').value = c.postalCode || '';
+        document.getElementById('edit_limit').value = c.employeeLimit || 100;
+        document.getElementById('edit_desc').value = c.description || '';
+
+        document.getElementById('edit_adminFirst').value = admin.firstName || '';
+        document.getElementById('edit_adminLast').value = admin.lastName || '';
+        document.getElementById('edit_adminEmail').value = admin.email || '';
+    }
+
+    function closeEditModal() {
+        document.getElementById('editModal').style.display = 'none';
+        document.body.style.overflow = '';
+        currentEditCompanyId = null;
+    }
+
+    async function submitEditCompany() {
+        if (!currentEditCompanyId) return;
+
+        var name = document.getElementById('edit_name').value.trim();
+        var email = document.getElementById('edit_email').value.trim();
+
+        if (!name || !email) {
+            toast('Company name and email are required', 'error');
+            return;
+        }
+
+        var btn = document.getElementById('editSubmitBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+
+        var payload = {
+            name: name,
+            email: email,
+            phone: document.getElementById('edit_phone').value.trim() || null,
+            website: document.getElementById('edit_website').value.trim() || null,
+            gstNumber: document.getElementById('edit_gst').value.trim().toUpperCase() || null,
+            panNumber: document.getElementById('edit_pan').value.trim().toUpperCase() || null,
+            address: document.getElementById('edit_address').value.trim() || null,
+            city: document.getElementById('edit_city').value.trim() || null,
+            state: document.getElementById('edit_state').value.trim() || null,
+            country: document.getElementById('edit_country').value.trim() || null,
+            postalCode: document.getElementById('edit_postal').value.trim() || null,
+            employeeLimit: parseInt(document.getElementById('edit_limit').value) || 100,
+            description: document.getElementById('edit_desc').value.trim() || null
+        };
+
+        var data = await api('/api/super-admin/companies/' + currentEditCompanyId, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
+
+        if (data && data.success) {
+            toast('Company updated successfully!', 'success');
+            closeEditModal();
+            loadCompanies();
+        } else {
+            toast((data && (data.error || data.message)) || 'Failed to update company', 'error');
+        }
+    }
+
     // ==================== CLOSE MODAL ON OVERLAY CLICK ====================
     document.getElementById('addModal').addEventListener('click', function(e) {
         if (e.target === this) closeAddModal();
+    });
+
+    document.getElementById('editModal').addEventListener('click', function(e) {
+        if (e.target === this) closeEditModal();
     });
 
     // ==================== EVENT LISTENERS ====================

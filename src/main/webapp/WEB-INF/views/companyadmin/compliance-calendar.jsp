@@ -1494,8 +1494,17 @@
     function formatDisplayDate(dateStr) {
         if (!dateStr) return '—';
         try {
-            var date = new Date(dateStr);
+            var str = String(dateStr).trim();
+            var date;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                date = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+            } else {
+                date = new Date(str);
+            }
+            if (isNaN(date.getTime())) return dateStr;
             return date.toLocaleDateString('en-IN', {
+                timeZone: 'Asia/Kolkata',
                 weekday: 'long',
                 year: 'numeric',
                 month: 'long',

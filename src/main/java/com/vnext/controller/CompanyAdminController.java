@@ -176,7 +176,10 @@ public class CompanyAdminController {
         for (CompanyCompliance sub : subCompliances) {
             ComplianceConfigDTO dto = buildBaseDTO(sub, companyId, companyName);
             Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(sub.getId());
-            boolean isFullyConfigured = configOpt.isPresent() && (configOpt.get().getFrequency() != null || configOpt.get().getDueDate() != null || configOpt.get().getCustomDueDate() != null);
+            if (configOpt.isEmpty() && sub.getSubTemplate() != null) {
+                configOpt = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(sub.getSubTemplate().getId());
+            }
+            boolean isFullyConfigured = configOpt.isPresent();
             if (isFullyConfigured) {
                 fillConfigDTO(dto, configOpt.get());
                 dto.setConfigured(true);
@@ -238,7 +241,10 @@ public class CompanyAdminController {
                 dto.setSubTemplateId(null);
                 dto.setSubTemplateName(null);
                 Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(parent.getId());
-                boolean isParentFullyConfigured = configOpt.isPresent() && (configOpt.get().getFrequency() != null || configOpt.get().getDueDate() != null || configOpt.get().getCustomDueDate() != null);
+                if (configOpt.isEmpty() && parent.getTemplate() != null) {
+                    configOpt = configRepository.findByTemplateIdAndCompanyComplianceIsNull(parent.getTemplate().getId());
+                }
+                boolean isParentFullyConfigured = configOpt.isPresent();
                 if (isParentFullyConfigured) {
                     fillConfigDTO(dto, configOpt.get());
                     dto.setConfigured(true);
@@ -830,6 +836,10 @@ public class CompanyAdminController {
         dto.setEditableForCompanies(editable);
         dto.setCanManage(editable);
 
+        dto.setReminderDaysBefore(null);
+        dto.setRepeatReminder(false);
+        dto.setReminderIntervalDays(null);
+
         if (cc.getCreatedAt() != null) {
             dto.setCreatedAt(cc.getCreatedAt());
         } else if (cc.getTemplate() != null && cc.getTemplate().getCreatedAt() != null) {
@@ -842,12 +852,21 @@ public class CompanyAdminController {
     private void fillConfigDTO(ComplianceConfigDTO dto, ComplianceConfig config) {
         dto.setId(config.getId());
         dto.setFrequency(config.getFrequency());
-        LocalDate effectiveDueDate = complianceService.calculateEffectiveDueDate(config);
-        dto.setEffectiveDueDate(effectiveDueDate);
-        dto.setDueDate(effectiveDueDate);
-        dto.setReminderDaysBefore(config.getReminderDaysBefore());
-        dto.setRepeatReminder(config.getRepeatReminder());
-        dto.setReminderIntervalDays(config.getReminderIntervalDays());
+        if (config.getFrequency() != null) {
+            LocalDate effectiveDueDate = complianceService.calculateEffectiveDueDate(config);
+            dto.setEffectiveDueDate(effectiveDueDate);
+            dto.setDueDate(effectiveDueDate);
+            dto.setReminderDaysBefore(config.getReminderDaysBefore());
+            dto.setRepeatReminder(config.getRepeatReminder());
+            dto.setReminderIntervalDays(config.getReminderIntervalDays());
+        } else {
+            dto.setEffectiveDueDate(null);
+            dto.setDueDate(null);
+            dto.setReminderDaysBefore(null);
+            dto.setRepeatReminder(false);
+            dto.setReminderIntervalDays(null);
+        }
+        dto.setDescription(config.getDescription());
         dto.setInstructions(config.getInstructions());
         dto.setDocumentRequired(config.getDocumentRequired());
         dto.setExternalLink(config.getExternalLink());
@@ -869,27 +888,40 @@ public class CompanyAdminController {
         ComplianceConfigDTO dto = new ComplianceConfigDTO();
         dto.setId(config.getId());
         dto.setFrequency(config.getFrequency());
-        dto.setDueDate(config.getDueDate());
-        dto.setCustomDueDate(config.getCustomDueDate());
-        dto.setDueDayOfMonth(config.getDueDayOfMonth());
-        dto.setDueQuarter(config.getDueQuarter());
-        dto.setDueHalf(config.getDueHalf());
-        dto.setDueMonth(config.getDueMonth());
-        dto.setReminderDaysBefore(config.getReminderDaysBefore());
-        dto.setRepeatReminder(config.getRepeatReminder());
-        dto.setReminderIntervalDays(config.getReminderIntervalDays());
+        if (config.getFrequency() != null) {
+            dto.setDueDate(config.getDueDate());
+            dto.setCustomDueDate(config.getCustomDueDate());
+            dto.setDueDayOfMonth(config.getDueDayOfMonth());
+            dto.setDueQuarter(config.getDueQuarter());
+            dto.setDueHalf(config.getDueHalf());
+            dto.setDueMonth(config.getDueMonth());
+            dto.setReminderDaysBefore(config.getReminderDaysBefore());
+            dto.setRepeatReminder(config.getRepeatReminder());
+            dto.setReminderIntervalDays(config.getReminderIntervalDays());
+            LocalDate effectiveDueDate = complianceService.calculateEffectiveDueDate(config);
+            dto.setEffectiveDueDate(effectiveDueDate);
+            if (effectiveDueDate != null) {
+                dto.setDueDate(effectiveDueDate);
+            }
+        } else {
+            dto.setDueDate(null);
+            dto.setCustomDueDate(null);
+            dto.setDueDayOfMonth(null);
+            dto.setDueQuarter(null);
+            dto.setDueHalf(null);
+            dto.setDueMonth(null);
+            dto.setReminderDaysBefore(null);
+            dto.setRepeatReminder(false);
+            dto.setReminderIntervalDays(null);
+            dto.setEffectiveDueDate(null);
+        }
         dto.setDescription(config.getDescription());
         dto.setDocumentRequired(config.getDocumentRequired());
         dto.setExternalLink(config.getExternalLink());
         dto.setInstructions(config.getInstructions());
         dto.setIsActive(config.getIsActive());
         dto.setIsSuperAdminConfig(config.getIsSuperAdminConfig());
-
-        LocalDate effectiveDueDate = complianceService.calculateEffectiveDueDate(config);
-        dto.setEffectiveDueDate(effectiveDueDate);
-        if (effectiveDueDate != null) {
-            dto.setDueDate(effectiveDueDate);
-        }
+        dto.setConfigured(true);
 
         if (config.getCompanyCompliance() != null) {
             dto.setCompanyComplianceId(config.getCompanyCompliance().getId());

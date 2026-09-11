@@ -37,6 +37,11 @@ public interface DeviceTokenRepository extends JpaRepository<DeviceToken, Long> 
 
     @Modifying
     @Transactional
+    @Query("DELETE FROM DeviceToken dt WHERE dt.deviceToken = :deviceToken AND dt.userId != :userId")
+    void deleteByDeviceTokenAndUserIdNot(String deviceToken, Long userId);
+
+    @Modifying
+    @Transactional
     @Query("UPDATE DeviceToken dt SET dt.lastSeen = CURRENT_TIMESTAMP WHERE dt.deviceToken = :token")
     void updateLastSeen(String token);
 }

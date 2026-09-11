@@ -33,9 +33,9 @@ public class ComplianceConfigDTO {
     private Integer dueHalf;
     private Integer dueMonth;
 
-    private Integer reminderDaysBefore = 10;
-    private Boolean repeatReminder = true;
-    private Integer reminderIntervalDays = 3;
+    private Integer reminderDaysBefore;
+    private Boolean repeatReminder = false;
+    private Integer reminderIntervalDays;
 
     private Boolean editableForCompanies = false;
     private Boolean canManage = false;

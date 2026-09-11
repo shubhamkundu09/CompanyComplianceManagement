@@ -1815,6 +1815,7 @@
                 <div class="form-group">
                     <label class="form-label">Frequency</label>
                     <select id="configFrequency" class="form-input">
+                        <option value="">None</option>
                         <option value="ONE_TIME">One Time</option>
                         <option value="MONTHLY">Monthly</option>
                         <option value="QUARTERLY">Quarterly</option>
@@ -1909,9 +1910,10 @@
                     </div>
                 </div>
 
-                <div class="form-group">
+                <div id="configReminderDaysSection" class="form-group">
                     <label class="form-label">Reminder Days Before</label>
                     <select id="configReminderDays" class="form-input">
+                        <option value="">None</option>
                         <option value="1">1 day before</option>
                         <option value="3">3 days before</option>
                         <option value="5">5 days before</option>
@@ -1923,7 +1925,7 @@
                     </select>
                 </div>
 
-                <div class="form-group">
+                <div id="configRepeatReminderSection" class="form-group">
                     <label class="form-label">Repeat Reminder Until Completed</label>
                     <select id="configRepeatReminder" class="form-input">
                         <option value="true">Yes</option>
@@ -1931,7 +1933,7 @@
                     </select>
                 </div>
 
-                <div id="configIntervalSection" class="form-group">
+                <div id="configIntervalSection" style="display:none;" class="form-group">
                     <label class="form-label">Repeat Interval (Days)</label>
                     <select id="configReminderIntervalDays" class="form-input">
                         <option value="1">Every day</option>
@@ -2068,9 +2070,15 @@
     function formatDate(d) {
         if (!d) return '—';
         try {
-            var date = new Date(d);
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var date = new Date(str);
             if (isNaN(date.getTime())) return '—';
-            return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            return date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
         } catch(e) {
             return '—';
         }
@@ -2079,9 +2087,23 @@
     function formatDateTime(d) {
         if (!d) return '—';
         try {
-            var date = new Date(d);
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var date = new Date(str);
             if (isNaN(date.getTime())) return '—';
-            return date.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            return date.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
         } catch(e) {
             return '—';
         }
@@ -2098,6 +2120,7 @@
     }
 
     function getFrequencyLabel(freq) {
+        if (!freq) return 'None';
         var map = {
             'MONTHLY': 'Monthly',
             'QUARTERLY': 'Quarterly',
@@ -2105,7 +2128,7 @@
             'YEARLY': 'Yearly',
             'ONE_TIME': 'One Time'
         };
-        return map[freq] || freq || '—';
+        return map[freq] || freq || 'None';
     }
 
     function getDaysRemaining(dueDate) {
@@ -2577,12 +2600,12 @@
            "</div></div>";
        html +=
            '<div class="config-item"><div class="label">Due Date</div><div class="value">' +
-           formatDate(config.dueDate) +
+           (config.dueDate ? formatDate(config.dueDate) : "No due date") +
            "</div></div>";
        html +=
            '<div class="config-item"><div class="label">Reminder</div><div class="value">' +
-           (config.reminderDaysBefore || 10) +
-           " days before</div></div>";
+           (config.reminderDaysBefore ? config.reminderDaysBefore + " days before" : "None") +
+           "</div></div>";
        if (config.instructions) {
            html +=
                '<div class="config-item" style="grid-column:1/-1;"><div class="label">Instructions</div><div class="value" style="white-space:pre-line;font-size:13px;">' +
@@ -2780,18 +2803,11 @@
                 "</div>" +
                 "</div>" +
                 '<div class="sub-meta-row">' +
-                '<span class="' +
-                dueMetaClass +
-                '"><i class="fas fa-calendar-alt"></i>Due: ' +
-                formatDate(s.dueDate) +
-                daysLabel +
-                "</span>" +
+                (s.dueDate ? ('<span class="' + dueMetaClass + '"><i class="fas fa-calendar-alt"></i>Due: ' + formatDate(s.dueDate) + daysLabel + '</span>') : '<span class="sub-meta-item"><i class="fas fa-calendar-alt"></i>No due date</span>') +
                 '<span class="sub-meta-item"><i class="fas fa-redo"></i>' +
                 getFrequencyLabel(s.frequency) +
                 "</span>" +
-                '<span class="sub-meta-item"><i class="fas fa-bell"></i>Reminder: ' +
-                (s.reminderDaysBefore || 10) +
-                " days</span>" +
+                (s.reminderDaysBefore ? ('<span class="sub-meta-item"><i class="fas fa-bell"></i>Reminder: ' + s.reminderDaysBefore + ' days</span>') : '') +
                 "</div>";
 
             if (s.description) {
@@ -2948,7 +2964,7 @@
         // Pre-populate if config exists
         var config = parentData.targetEntry || parentData.parentEntry;
         if (config) {
-            document.getElementById('configFrequency').value = config.frequency || 'ONE_TIME';
+            document.getElementById('configFrequency').value = config.frequency || '';
             document.getElementById('configDueDate').value = config.dueDate || '';
             document.getElementById('configInstructions').value = config.instructions || '';
             document.getElementById('configDocumentRequired').value = config.documentRequired || '';
@@ -2956,9 +2972,9 @@
             document.getElementById('configReminderDays').value = config.reminderDaysBefore || 10;
             document.getElementById('configRepeatReminder').value = config.repeatReminder !== false ? 'true' : 'false';
             document.getElementById('configReminderIntervalDays').value = config.reminderIntervalDays || 3;
-            showConfigSections(config.frequency || 'ONE_TIME');
+            showConfigSections(config.frequency || '');
         } else {
-            document.getElementById('configFrequency').value = 'ONE_TIME';
+            document.getElementById('configFrequency').value = '';
             document.getElementById('configDueDate').value = '';
             document.getElementById('configInstructions').value = '';
             document.getElementById('configDocumentRequired').value = '';
@@ -2966,7 +2982,7 @@
             document.getElementById('configReminderDays').value = '10';
             document.getElementById('configRepeatReminder').value = 'true';
             document.getElementById('configReminderIntervalDays').value = '3';
-            showConfigSections('ONE_TIME');
+            showConfigSections('');
         }
 
         document.getElementById('configModal').style.display = 'flex';
@@ -2986,15 +3002,17 @@
         // Try to load existing config
         var sub = allSubCompliances.find(function(s) { return s.subTemplateId === subTemplateId; });
         if (sub && sub.isActive) {
-            document.getElementById('configFrequency').value = sub.frequency || 'ONE_TIME';
+            document.getElementById('configFrequency').value = sub.frequency || '';
             document.getElementById('configDueDate').value = sub.dueDate || '';
             document.getElementById('configInstructions').value = sub.instructions || '';
             document.getElementById('configDocumentRequired').value = sub.documentRequired || '';
             document.getElementById('configExternalLink').value = sub.externalLink || '';
             document.getElementById('configReminderDays').value = sub.reminderDaysBefore || 10;
-            showConfigSections(sub.frequency || 'ONE_TIME');
+            document.getElementById('configRepeatReminder').value = sub.repeatReminder !== false ? 'true' : 'false';
+            document.getElementById('configReminderIntervalDays').value = sub.reminderIntervalDays || 3;
+            showConfigSections(sub.frequency || '');
         } else {
-            document.getElementById('configFrequency').value = 'ONE_TIME';
+            document.getElementById('configFrequency').value = '';
             document.getElementById('configDueDate').value = '';
             document.getElementById('configInstructions').value = '';
             document.getElementById('configDocumentRequired').value = '';
@@ -3002,7 +3020,7 @@
             document.getElementById('configReminderDays').value = '10';
             document.getElementById('configRepeatReminder').value = 'true';
             document.getElementById('configReminderIntervalDays').value = '3';
-            showConfigSections('ONE_TIME');
+            showConfigSections('');
         }
 
         document.getElementById('configModal').style.display = 'flex';
@@ -3028,6 +3046,17 @@
             document.getElementById(sections[i]).style.display = 'none';
         }
 
+        var hasFreq = frequency && frequency !== '';
+        var reminderDaysSec = document.getElementById('configReminderDaysSection');
+        if (reminderDaysSec) reminderDaysSec.style.display = hasFreq ? 'block' : 'none';
+        var repeatReminderSec = document.getElementById('configRepeatReminderSection');
+        if (repeatReminderSec) repeatReminderSec.style.display = hasFreq ? 'block' : 'none';
+        var intervalSec = document.getElementById('configIntervalSection');
+        if (intervalSec) {
+            var repeatVal = document.getElementById('configRepeatReminder').value;
+            intervalSec.style.display = (hasFreq && repeatVal === 'true') ? 'block' : 'none';
+        }
+
         if (frequency === 'ONE_TIME') {
             document.getElementById('configDueDateSection').style.display = 'block';
         } else if (frequency === 'MONTHLY') {
@@ -3047,14 +3076,21 @@
         var frequency = document.getElementById('configFrequency').value;
 
         var payload = {
-            frequency: frequency,
-            reminderDaysBefore: parseInt(document.getElementById('configReminderDays').value),
-            repeatReminder: document.getElementById('configRepeatReminder').value === 'true',
-            reminderIntervalDays: parseInt(document.getElementById('configReminderIntervalDays').value),
+            frequency: frequency || null,
             instructions: document.getElementById('configInstructions').value || null,
             documentRequired: document.getElementById('configDocumentRequired').value || null,
             externalLink: document.getElementById('configExternalLink').value || null
         };
+
+        if (frequency && frequency !== '') {
+            payload.reminderDaysBefore = parseInt(document.getElementById('configReminderDays').value);
+            payload.repeatReminder = document.getElementById('configRepeatReminder').value === 'true';
+            payload.reminderIntervalDays = parseInt(document.getElementById('configReminderIntervalDays').value);
+        } else {
+            payload.reminderDaysBefore = null;
+            payload.repeatReminder = false;
+            payload.reminderIntervalDays = null;
+        }
 
         if (frequency === 'ONE_TIME') {
             payload.customDueDate = document.getElementById('configDueDate').value || null;

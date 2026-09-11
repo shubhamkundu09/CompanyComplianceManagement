@@ -13,4 +13,9 @@ public class AuthRequest {
 
     @NotBlank(message = "Password is required")
     private String password;
+
+    private String deviceToken;
+    private String platform;
+    private String deviceName;
+    private String appVersion;
 }

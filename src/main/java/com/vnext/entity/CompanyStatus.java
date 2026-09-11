@@ -2,6 +2,7 @@ package com.vnext.entity;
 
 public enum CompanyStatus {
     ACTIVE("Active"),
+    INACTIVE("Inactive"),
     DEACTIVATED("Deactivated");
 
     private final String displayName;
@@ -19,6 +20,6 @@ public enum CompanyStatus {
     }
 
     public boolean isDeactivated() {
-        return this == DEACTIVATED;
+        return this == DEACTIVATED || this == INACTIVE;
     }
 }

@@ -1310,7 +1310,17 @@
 
     function formatDate(d) {
         if (!d) return '—';
-        return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        try {
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var date = new Date(str);
+            if (isNaN(date.getTime())) return '—';
+            return date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
+        } catch(e) { return '—'; }
     }
 
     // ==================== SIDEBAR / LOGOUT / NOTIFICATIONS ====================

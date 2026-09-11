@@ -1,6 +1,7 @@
 // dto/CompanyDTO.java
 package com.vnext.dto;
 
+import com.vnext.entity.CompanyStatus;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 
@@ -17,7 +18,7 @@ public class CompanyDTO {
     @Email(message = "Invalid email format")
     private String email;
 
-    @Pattern(regexp = "^[0-9]{10,15}$", message = "Phone number must be 10-15 digits")
+    @Pattern(regexp = "^$|^[0-9]{10,15}$", message = "Phone number must be 10-15 digits")
     private String phone;
 
     private String address;
@@ -30,12 +31,12 @@ public class CompanyDTO {
     private String registrationNumber;
 
     // GST number validation (India specific)
-    @Pattern(regexp = "^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
+    @Pattern(regexp = "^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
             message = "Invalid GST number format")
     private String gstNumber;
 
     // PAN number validation (India specific)
-    @Pattern(regexp = "^[A-Z]{5}[0-9]{4}[A-Z]{1}$",
+    @Pattern(regexp = "^$|^[A-Z]{5}[0-9]{4}[A-Z]{1}$",
             message = "Invalid PAN number format")
     private String panNumber;
 
@@ -43,15 +44,11 @@ public class CompanyDTO {
 
     private Integer employeeLimit;
     private Integer currentEmployeeCount;
+    private CompanyStatus status;
 
     // Company Admin Details
-    @NotBlank(message = "Company admin first name is required")
     private String adminFirstName;
-
-    @NotBlank(message = "Company admin last name is required")
     private String adminLastName;
-
-    @NotBlank(message = "Company admin email is required")
-    @Email(message = "Invalid admin email format")
     private String adminEmail;
+    private String adminPhone;
 }

@@ -19,11 +19,18 @@ public class PushNotificationService {
     private final DeviceTokenService deviceTokenService;
 
     public void sendToUser(Long userId, NotificationPayload payload) {
-        log.info("Sending push notification to user {}: {} - {}", userId, payload.getTitle(), payload.getBody());
+        sendToUserExcludingDevice(userId, null, payload);
+    }
+
+    public void sendToUserExcludingDevice(Long userId, String excludeToken, NotificationPayload payload) {
+        log.info("Sending push notification to user {} (excluding token {}): {} - {}", userId, excludeToken, payload.getTitle(), payload.getBody());
+        if (userId == null) return;
+
         var tokens = deviceTokenRepository.findByUserId(userId)
                 .stream()
                 .map(DeviceToken::getDeviceToken)
                 .filter(t -> t != null && !t.trim().isEmpty())
+                .filter(t -> excludeToken == null || !t.trim().equalsIgnoreCase(excludeToken.trim()))
                 .collect(Collectors.toList());
 
         var realTokens = tokens.stream()
@@ -31,7 +38,7 @@ public class PushNotificationService {
                 .collect(Collectors.toList());
 
         if (realTokens.isEmpty()) {
-            log.warn("No real FCM device token registered for user {}. Total stored tokens: {}, Stored tokens: {}", userId, tokens.size(), tokens);
+            log.info("No other real FCM device token registered for user {} (after excluding {}). Total tokens: {}", userId, excludeToken, tokens.size());
             return;
         }
         sendMulticast(realTokens, payload);
@@ -60,6 +67,11 @@ public class PushNotificationService {
 
     private void sendMulticast(List<String> tokens, NotificationPayload payload) {
         if (tokens.isEmpty()) return;
+
+        if (com.google.firebase.FirebaseApp.getApps().isEmpty()) {
+            log.warn("FirebaseApp is not initialized. Skipping FCM multicast push.");
+            return;
+        }
 
         try {
             AndroidConfig androidConfig = AndroidConfig.builder()

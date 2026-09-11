@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 @Service
@@ -16,12 +17,15 @@ import java.util.List;
 @Slf4j
 public class DeviceTokenService {
 
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+
     private final DeviceTokenRepository deviceTokenRepository;
 
     @Transactional
     public void registerDeviceToken(Long userId, String token, String platform, String deviceName, String appVersion) {
         if (token == null || token.trim().isEmpty() || userId == null) return;
 
+        String cleanToken = token.trim();
         Platform p = Platform.ANDROID;
         try {
             if (platform != null) {
@@ -31,27 +35,34 @@ public class DeviceTokenService {
             p = Platform.ANDROID;
         }
 
-        var existing = deviceTokenRepository.findByUserIdAndDeviceToken(userId, token);
+        // Dissociate this physical device token from any other users to prevent cross-account notifications
+        deviceTokenRepository.deleteByDeviceTokenAndUserIdNot(cleanToken, userId);
+
+        var existing = deviceTokenRepository.findByUserIdAndDeviceToken(userId, cleanToken);
         if (existing.isPresent()) {
             var device = existing.get();
             device.setPlatform(p);
-            device.setDeviceName(deviceName);
-            device.setAppVersion(appVersion);
-            device.setLastSeen(LocalDateTime.now());
+            if (deviceName != null && !deviceName.trim().isEmpty()) {
+                device.setDeviceName(deviceName.trim());
+            }
+            if (appVersion != null && !appVersion.trim().isEmpty()) {
+                device.setAppVersion(appVersion.trim());
+            }
+            device.setLastSeen(LocalDateTime.now(IST_ZONE));
             deviceTokenRepository.save(device);
-            log.info("Updated device token for user {}: platform={}, device={}, token={}", userId, p, deviceName, token);
+            log.info("Updated device token for user {}: platform={}, device={}, token={}", userId, p, device.getDeviceName(), cleanToken);
             return;
         }
 
         var newDevice = new DeviceToken();
         newDevice.setUserId(userId);
-        newDevice.setDeviceToken(token);
+        newDevice.setDeviceToken(cleanToken);
         newDevice.setPlatform(p);
-        newDevice.setDeviceName(deviceName);
-        newDevice.setAppVersion(appVersion);
-        newDevice.setLastSeen(LocalDateTime.now());
+        newDevice.setDeviceName(deviceName != null && !deviceName.trim().isEmpty() ? deviceName.trim() : (p == Platform.IOS ? "iPhone" : "Android Device"));
+        newDevice.setAppVersion(appVersion != null && !appVersion.trim().isEmpty() ? appVersion.trim() : "1.0.0");
+        newDevice.setLastSeen(LocalDateTime.now(IST_ZONE));
         deviceTokenRepository.save(newDevice);
-        log.info("Registered new device token for user {}: platform={}, device={}, token={}", userId, p, deviceName, token);
+        log.info("Registered new device token for user {}: platform={}, device={}, token={}", userId, p, newDevice.getDeviceName(), cleanToken);
     }
 
     @Transactional

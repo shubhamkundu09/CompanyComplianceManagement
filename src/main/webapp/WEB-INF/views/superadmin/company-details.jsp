@@ -1470,25 +1470,22 @@
                 </div>
             </div>
 
-            <div style="margin:20px 0 16px 0;font-size:13px;font-weight:600;color:var(--primary);border-top:1px solid rgba(226,232,240,0.5);padding-top:20px;">
-                <i class="fas fa-user-shield"></i> Company Admin Details (Readonly - NO CHANGE)
+            <div style="margin:20px 0 16px 0;font-size:13px;font-weight:600;color:var(--primary);border-top:1px solid rgba(226,232,240,0.5);padding-top:20px;display:flex;align-items:center;justify-content:space-between;">
+                <span><i class="fas fa-user-shield"></i> Company Admin Account</span>
+                <span style="font-size:10px;font-weight:600;background:rgba(100,116,139,0.15);color:var(--gray-600);padding:2px 8px;border-radius:10px;letter-spacing:0.5px;text-transform:uppercase;">Read-only</span>
             </div>
             <div class="grid-2">
                 <div>
-                    <label class="form-label">Admin First Name <span style="color:var(--danger);">*</span></label>
-                    <input id="e_adminFirst" class="form-input" type="text">
+                    <label class="form-label">First Name</label>
+                    <input id="e_adminFirst" class="form-input" type="text" readonly disabled style="background:var(--bg);cursor:not-allowed;color:var(--gray-600);">
                 </div>
                 <div>
-                    <label class="form-label">Admin Last Name <span style="color:var(--danger);">*</span></label>
-                    <input id="e_adminLast" class="form-input" type="text">
+                    <label class="form-label">Last Name</label>
+                    <input id="e_adminLast" class="form-input" type="text" readonly disabled style="background:var(--bg);cursor:not-allowed;color:var(--gray-600);">
                 </div>
                 <div class="col-2">
-                    <label class="form-label">Admin Email <span style="color:var(--danger);">*</span></label>
-                    <input id="e_adminEmail" class="form-input" type="email">
-                </div>
-                <div class="col-2">
-                    <label class="form-label">Admin Phone</label>
-                    <input id="e_adminPhone" class="form-input" type="text">
+                    <label class="form-label">Admin Email</label>
+                    <input id="e_adminEmail" class="form-input" type="email" readonly disabled style="background:var(--bg);cursor:not-allowed;color:var(--gray-600);">
                 </div>
             </div>
         </div>
@@ -1676,12 +1673,40 @@
 
     function formatDate(d) {
         if (!d) return '—';
-        return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        try {
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var date = new Date(str);
+            if (isNaN(date.getTime())) return '—';
+            return date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
+        } catch(e) { return '—'; }
     }
 
     function formatDateTime(d) {
         if (!d) return '—';
-        return new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        try {
+            var str = String(d).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                var p = str.split('-');
+                var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            var date = new Date(str);
+            if (isNaN(date.getTime())) return '—';
+            return date.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
+        } catch(e) { return '—'; }
     }
 
     // ==================== SIDEBAR ====================
@@ -2037,13 +2062,21 @@
     }
 
     async function submitEdit() {
+        var name = document.getElementById('e_name').value.trim();
+        var email = document.getElementById('e_email').value.trim();
+
+        if (!name || !email) {
+            toast('Company name and email are required', 'error');
+            return;
+        }
+
         var btn = document.getElementById('editSubmitBtn');
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
 
         var payload = {
-            name: document.getElementById('e_name').value.trim(),
-            email: document.getElementById('e_email').value.trim(),
+            name: name,
+            email: email,
             phone: document.getElementById('e_phone').value.trim() || null,
             website: document.getElementById('e_website').value.trim() || null,
             gstNumber: document.getElementById('e_gst').value.trim().toUpperCase() || null,
@@ -2054,19 +2087,8 @@
             country: document.getElementById('e_country').value.trim() || null,
             postalCode: document.getElementById('e_postal').value.trim() || null,
             taxId: document.getElementById('e_taxid').value.trim() || null,
-            description: document.getElementById('e_desc').value.trim() || null,
-            adminFirstName: document.getElementById('e_adminFirst').value.trim(),
-            adminLastName: document.getElementById('e_adminLast').value.trim(),
-            adminEmail: document.getElementById('e_adminEmail').value.trim(),
-            adminPhone: document.getElementById('e_adminPhone').value.trim() || null
+            description: document.getElementById('e_desc').value.trim() || null
         };
-
-        if (!payload.adminFirstName || !payload.adminLastName || !payload.adminEmail) {
-            toast('Admin first name, last name and email are required', 'error');
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
-            return;
-        }
 
         var data = await api('/api/super-admin/companies/' + CID, { method: 'PUT', body: JSON.stringify(payload) });
         btn.disabled = false;

@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -26,6 +27,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class ComplianceService {
+
+    public static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final ComplianceTemplateRepository templateRepository;
     private final ComplianceSubTemplateRepository subTemplateRepository;
@@ -367,7 +370,10 @@ public class ComplianceService {
                     subMap.put("companyComplianceId", subCC.getId());
 
                     Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(subCC.getId());
-                    boolean isConfigured = configOpt.isPresent() && (configOpt.get().getFrequency() != null || configOpt.get().getDueDate() != null || configOpt.get().getCustomDueDate() != null);
+                    if (configOpt.isEmpty() && sub.getId() != null) {
+                        configOpt = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(sub.getId());
+                    }
+                    boolean isConfigured = configOpt.isPresent();
                     subMap.put("isConfigured", isConfigured);
 
                     ComplianceStatus currentStatus = subCC.getStatus() != null ? subCC.getStatus() : ComplianceStatus.PENDING;
@@ -754,7 +760,7 @@ public class ComplianceService {
                     subDto.setInstructions(config.getInstructions());
                     subDto.setDocumentRequired(config.getDocumentRequired());
                     subDto.setExternalLink(config.getExternalLink());
-                    subDto.setReminderDaysBefore(config.getReminderDaysBefore());
+                    subDto.setReminderDaysBefore(config.getFrequency() != null ? config.getReminderDaysBefore() : null);
                 });
             }
 
@@ -1044,15 +1050,27 @@ public class ComplianceService {
         }
 
         config.setFrequency(dto.getFrequency());
-        config.setDueDate(dto.getDueDate());
-        config.setCustomDueDate(dto.getCustomDueDate());
-        config.setDueDayOfMonth(dto.getDueDayOfMonth());
-        config.setDueQuarter(dto.getDueQuarter());
-        config.setDueHalf(dto.getDueHalf());
-        config.setDueMonth(dto.getDueMonth());
-        config.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
-        config.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
-        config.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);
+        if (dto.getFrequency() == null) {
+            config.setDueDate(null);
+            config.setCustomDueDate(null);
+            config.setDueDayOfMonth(null);
+            config.setDueQuarter(null);
+            config.setDueHalf(null);
+            config.setDueMonth(null);
+            config.setReminderDaysBefore(null);
+            config.setRepeatReminder(false);
+            config.setReminderIntervalDays(null);
+        } else {
+            config.setDueDate(dto.getDueDate());
+            config.setCustomDueDate(dto.getCustomDueDate());
+            config.setDueDayOfMonth(dto.getDueDayOfMonth());
+            config.setDueQuarter(dto.getDueQuarter());
+            config.setDueHalf(dto.getDueHalf());
+            config.setDueMonth(dto.getDueMonth());
+            config.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
+            config.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
+            config.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);
+        }
         config.setDescription(dto.getDescription());
         config.setDocumentRequired(dto.getDocumentRequired());
         config.setExternalLink(dto.getExternalLink());
@@ -1128,15 +1146,27 @@ public class ComplianceService {
 
         config.setCompanyCompliance(companyCompliance);
         config.setFrequency(dto.getFrequency());
-        config.setDueDate(dto.getDueDate());
-        config.setCustomDueDate(dto.getCustomDueDate());
-        config.setDueDayOfMonth(dto.getDueDayOfMonth());
-        config.setDueQuarter(dto.getDueQuarter());
-        config.setDueHalf(dto.getDueHalf());
-        config.setDueMonth(dto.getDueMonth());
-        config.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
-        config.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
-        config.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);
+        if (dto.getFrequency() == null) {
+            config.setDueDate(null);
+            config.setCustomDueDate(null);
+            config.setDueDayOfMonth(null);
+            config.setDueQuarter(null);
+            config.setDueHalf(null);
+            config.setDueMonth(null);
+            config.setReminderDaysBefore(null);
+            config.setRepeatReminder(false);
+            config.setReminderIntervalDays(null);
+        } else {
+            config.setDueDate(dto.getDueDate());
+            config.setCustomDueDate(dto.getCustomDueDate());
+            config.setDueDayOfMonth(dto.getDueDayOfMonth());
+            config.setDueQuarter(dto.getDueQuarter());
+            config.setDueHalf(dto.getDueHalf());
+            config.setDueMonth(dto.getDueMonth());
+            config.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
+            config.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
+            config.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);
+        }
         config.setDescription(dto.getDescription());
         config.setDocumentRequired(dto.getDocumentRequired());
         config.setExternalLink(dto.getExternalLink());
@@ -1195,7 +1225,7 @@ public class ComplianceService {
             Optional<EmployeeAssignment> existingSubAssign = assignmentRepository
                     .findByConfigIdAndEmployeeIdAndIsActiveTrue(subConfig.getId(), employeeId);
 
-            LocalDate subDueDate = subConfig.getDueDate() != null ? subConfig.getDueDate() : parentAssign.getDueDate();
+            LocalDate subDueDate = subConfig.getFrequency() != null ? (subConfig.getDueDate() != null ? subConfig.getDueDate() : parentAssign.getDueDate()) : null;
             boolean subAlreadyCompleted = subCC.getStatus() == ComplianceStatus.COMPLETED || subCC.getCompletedAt() != null;
 
             if (existingSubAssign.isEmpty()) {
@@ -1203,12 +1233,12 @@ public class ComplianceService {
                 subAssign.setConfig(subConfig);
                 subAssign.setEmployeeId(employeeId);
                 subAssign.setDueDate(subDueDate);
-                subAssign.setAssignedAt(LocalDateTime.now());
+                subAssign.setAssignedAt(LocalDateTime.now(IST_ZONE));
                 subAssign.setIsActive(true);
                 subAssign.setIsSubAssignment(true);
                 subAssign.setParentAssignmentId(parentAssign.getId());
                 if (subAlreadyCompleted) {
-                    subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                    subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now(IST_ZONE));
                     subAssign.setCompletedBy(subCC.getCompletedBy());
                     subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
                     subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
@@ -1224,7 +1254,7 @@ public class ComplianceService {
                     subAssign.setDueDate(subDueDate);
                 }
                 if (subAlreadyCompleted && subAssign.getCompletedAt() == null) {
-                    subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                    subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now(IST_ZONE));
                     subAssign.setCompletedBy(subCC.getCompletedBy());
                     subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
                     subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
@@ -1504,7 +1534,7 @@ public class ComplianceService {
                 assignment.setConfig(config);
                 assignment.setEmployeeId(employeeId);
                 assignment.setDueDate(config.getDueDate() != null ? config.getDueDate() : calculateDueDate(config));
-                assignment.setAssignedAt(LocalDateTime.now());
+                assignment.setAssignedAt(LocalDateTime.now(IST_ZONE));
                 assignment.setIsActive(true);
                 assignment.setIsSubAssignment(companyCompliance != null && !companyCompliance.isParent());
                 assignment.setParentAssignmentId(null);
@@ -1628,7 +1658,7 @@ if (parentCC == null) {
                 parentAssign.setIsSubAssignment(false);
                 if (parentCC.getStatus() == ComplianceStatus.COMPLETED || parentCC.getCompletedAt() != null) {
                     if (parentAssign.getCompletedAt() == null) {
-                        parentAssign.setCompletedAt(parentCC.getCompletedAt() != null ? parentCC.getCompletedAt() : LocalDateTime.now());
+                        parentAssign.setCompletedAt(parentCC.getCompletedAt() != null ? parentCC.getCompletedAt() : LocalDateTime.now(IST_ZONE));
                         parentAssign.setCompletedBy(parentCC.getCompletedBy());
                         parentAssign.setSubmissionReference(parentCC.getAdminSubmissionReference());
                         parentAssign.setSubmissionDocumentUrl(parentCC.getAdminSubmissionDocumentUrl());
@@ -1640,12 +1670,12 @@ if (parentCC == null) {
                 parentAssign.setConfig(parentConfig);
                 parentAssign.setEmployeeId(employeeId);
                 parentAssign.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : LocalDate.now().plusMonths(1));
-                parentAssign.setAssignedAt(LocalDateTime.now());
+                parentAssign.setAssignedAt(LocalDateTime.now(IST_ZONE));
                 parentAssign.setIsActive(true);
                 parentAssign.setIsSubAssignment(false);
                 parentAssign.setParentAssignmentId(null);
                 if (parentCC.getStatus() == ComplianceStatus.COMPLETED || parentCC.getCompletedAt() != null) {
-                    parentAssign.setCompletedAt(parentCC.getCompletedAt() != null ? parentCC.getCompletedAt() : LocalDateTime.now());
+                    parentAssign.setCompletedAt(parentCC.getCompletedAt() != null ? parentCC.getCompletedAt() : LocalDateTime.now(IST_ZONE));
                     parentAssign.setCompletedBy(parentCC.getCompletedBy());
                     parentAssign.setSubmissionReference(parentCC.getAdminSubmissionReference());
                     parentAssign.setSubmissionDocumentUrl(parentCC.getAdminSubmissionDocumentUrl());
@@ -1680,12 +1710,12 @@ if (parentCC == null) {
                         subAssign.setConfig(subConfig);
                         subAssign.setEmployeeId(employeeId);
                         subAssign.setDueDate(subDueDate);
-                        subAssign.setAssignedAt(LocalDateTime.now());
+                        subAssign.setAssignedAt(LocalDateTime.now(IST_ZONE));
                         subAssign.setIsActive(true);
                         subAssign.setIsSubAssignment(true);
                         subAssign.setParentAssignmentId(parentAssign.getId());
                         if (subAlreadyCompleted) {
-                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now(IST_ZONE));
                             subAssign.setCompletedBy(subCC.getCompletedBy());
                             subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
                             subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
@@ -1700,7 +1730,7 @@ if (parentCC == null) {
                             subAssign.setDueDate(subDueDate);
                         }
                         if (subAlreadyCompleted && subAssign.getCompletedAt() == null) {
-                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now());
+                            subAssign.setCompletedAt(subCC.getCompletedAt() != null ? subCC.getCompletedAt() : LocalDateTime.now(IST_ZONE));
                             subAssign.setCompletedBy(subCC.getCompletedBy());
                             subAssign.setSubmissionReference(subCC.getAdminSubmissionReference());
                             subAssign.setSubmissionDocumentUrl(subCC.getAdminSubmissionDocumentUrl());
@@ -2485,7 +2515,7 @@ if (parentCC == null) {
             dto.setInstructions(config.getInstructions());
             dto.setDocumentRequired(config.getDocumentRequired());
             dto.setExternalLink(config.getExternalLink());
-            dto.setReminderDaysBefore(config.getReminderDaysBefore());
+            dto.setReminderDaysBefore(config.getFrequency() != null ? config.getReminderDaysBefore() : null);
         });
 
         List<EmployeeAssignment> assignments = assignmentRepository.findByConfigIdAndIsActiveTrue(
@@ -2999,7 +3029,7 @@ if (parentCC == null) {
         history.setAction(action);
         history.setRemarks(remarks);
         history.setPerformedBy(performedBy);
-        history.setPerformedAt(LocalDateTime.now());
+        history.setPerformedAt(LocalDateTime.now(IST_ZONE));
         historyRepository.save(history);
     }
 
@@ -3185,7 +3215,7 @@ if (parentCC == null) {
             dto.setDueHalf(null);
             dto.setDueMonth(null);
             dto.setReminderDaysBefore(null);
-            dto.setRepeatReminder(null);
+            dto.setRepeatReminder(false);
             dto.setReminderIntervalDays(null);
             dto.setEffectiveDueDate(null);
         }
@@ -3264,7 +3294,7 @@ if (parentCC == null) {
         }
 
         Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(cc.getId());
-        boolean isConfigured = configOpt.isPresent() && (configOpt.get().getFrequency() != null || configOpt.get().getDueDate() != null || configOpt.get().getCustomDueDate() != null);
+        boolean isConfigured = configOpt.isPresent();
         dto.setConfigured(isConfigured);
 
         ComplianceStatus status = cc.getStatus() != null ? cc.getStatus() : ComplianceStatus.PENDING;
@@ -3397,24 +3427,35 @@ if (parentCC == null) {
         CategoryDetailsDTO.ConfigInfoDTO dto = new CategoryDetailsDTO.ConfigInfoDTO();
         dto.setId(config.getId());
         dto.setFrequency(config.getFrequency() != null ? config.getFrequency().name() : null);
-        dto.setCustomDueDate(config.getCustomDueDate() != null ? config.getCustomDueDate().toString() : null);
-        dto.setDueDayOfMonth(config.getDueDayOfMonth());
-        dto.setDueQuarter(config.getDueQuarter());
-        dto.setDueHalf(config.getDueHalf());
-        dto.setDueMonth(config.getDueMonth());
-        dto.setReminderDaysBefore(config.getReminderDaysBefore());
-        dto.setRepeatReminder(config.getRepeatReminder());
-        dto.setReminderIntervalDays(config.getReminderIntervalDays());
+        if (config.getFrequency() != null) {
+            dto.setCustomDueDate(config.getCustomDueDate() != null ? config.getCustomDueDate().toString() : null);
+            dto.setDueDayOfMonth(config.getDueDayOfMonth());
+            dto.setDueQuarter(config.getDueQuarter());
+            dto.setDueHalf(config.getDueHalf());
+            dto.setDueMonth(config.getDueMonth());
+            dto.setReminderDaysBefore(config.getReminderDaysBefore());
+            dto.setRepeatReminder(config.getRepeatReminder());
+            dto.setReminderIntervalDays(config.getReminderIntervalDays());
+            LocalDate effectiveDueDate = calculateEffectiveDueDate(config);
+            if (effectiveDueDate != null) {
+                dto.setEffectiveDueDate(effectiveDueDate.toString());
+            }
+        } else {
+            dto.setCustomDueDate(null);
+            dto.setDueDayOfMonth(null);
+            dto.setDueQuarter(null);
+            dto.setDueHalf(null);
+            dto.setDueMonth(null);
+            dto.setReminderDaysBefore(null);
+            dto.setRepeatReminder(false);
+            dto.setReminderIntervalDays(null);
+            dto.setEffectiveDueDate(null);
+        }
         dto.setDescription(config.getDescription());
         dto.setDocumentRequired(config.getDocumentRequired());
         dto.setExternalLink(config.getExternalLink());
         dto.setInstructions(config.getInstructions());
         dto.setIsActive(config.getIsActive());
-
-        LocalDate effectiveDueDate = calculateEffectiveDueDate(config);
-        if (effectiveDueDate != null) {
-            dto.setEffectiveDueDate(effectiveDueDate.toString());
-        }
 
         return dto;
     }

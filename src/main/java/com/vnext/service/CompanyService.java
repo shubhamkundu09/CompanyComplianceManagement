@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -24,6 +25,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class CompanyService {
+
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final CompanyRepository companyRepository;
     private final UserRepository userRepository;
@@ -48,42 +51,59 @@ public class CompanyService {
     public CompanyResponseDTO createCompany(CompanyDTO companyDTO) {
         log.info("Creating new company: {}", companyDTO.getName());
 
+        if (companyDTO.getAdminFirstName() == null || companyDTO.getAdminFirstName().trim().isEmpty()) {
+            throw new BusinessException("Company admin first name is required");
+        }
+        if (companyDTO.getAdminLastName() == null || companyDTO.getAdminLastName().trim().isEmpty()) {
+            throw new BusinessException("Company admin last name is required");
+        }
+        if (companyDTO.getAdminEmail() == null || companyDTO.getAdminEmail().trim().isEmpty()) {
+            throw new BusinessException("Company admin email is required");
+        }
+
         if (companyRepository.existsByName(companyDTO.getName())) {
             throw new BusinessException("Company name already exists");
         }
         if (companyRepository.existsByEmail(companyDTO.getEmail())) {
             throw new BusinessException("Company email already exists");
         }
-        if (userRepository.existsByEmail(companyDTO.getAdminEmail())) {
+        if (userRepository.existsByEmail(companyDTO.getAdminEmail().trim())) {
             throw new BusinessException("Admin email already registered");
         }
 
         // Validate GST number format if provided
         if (companyDTO.getGstNumber() != null && !companyDTO.getGstNumber().trim().isEmpty()) {
-            if (!companyDTO.getGstNumber().matches("^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")) {
+            String gst = companyDTO.getGstNumber().trim().toUpperCase();
+            if (!gst.matches("^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")) {
                 throw new BusinessException("Invalid GST number format");
             }
-            if (companyRepository.findByGstNumber(companyDTO.getGstNumber()).isPresent()) {
+            if (companyRepository.findByGstNumber(gst).isPresent()) {
                 throw new BusinessException("GST number already registered");
             }
+            companyDTO.setGstNumber(gst);
         }
 
         if (companyDTO.getPanNumber() != null && !companyDTO.getPanNumber().trim().isEmpty()) {
-            if (!companyDTO.getPanNumber().matches("^[A-Z]{5}[0-9]{4}[A-Z]{1}$")) {
+            String pan = companyDTO.getPanNumber().trim().toUpperCase();
+            if (!pan.matches("^[A-Z]{5}[0-9]{4}[A-Z]{1}$")) {
                 throw new BusinessException("Invalid PAN number format");
             }
-            if (companyRepository.findByPanNumber(companyDTO.getPanNumber()).isPresent()) {
+            if (companyRepository.findByPanNumber(pan).isPresent()) {
                 throw new BusinessException("PAN number already registered");
             }
+            companyDTO.setPanNumber(pan);
         }
 
         String tempPassword = generateTemporaryPassword();
         String encodedPassword = passwordEncoder.encode(tempPassword);
 
         User companyAdmin = new User();
-        companyAdmin.setFirstName(companyDTO.getAdminFirstName());
-        companyAdmin.setLastName(companyDTO.getAdminLastName());
-        companyAdmin.setEmail(companyDTO.getAdminEmail());
+        companyAdmin.setFirstName(companyDTO.getAdminFirstName().trim());
+        companyAdmin.setLastName(companyDTO.getAdminLastName().trim());
+        companyAdmin.setEmail(companyDTO.getAdminEmail().trim());
+        if (companyDTO.getAdminPhone() != null && !companyDTO.getAdminPhone().trim().isEmpty()) {
+            companyAdmin.setPhoneNumber(companyDTO.getAdminPhone().trim());
+        }
         companyAdmin.setPassword(encodedPassword);
         companyAdmin.setRole(UserRole.COMPANY_ADMIN);
         companyAdmin.setStatus(UserStatus.ACTIVE);
@@ -110,8 +130,8 @@ public class CompanyService {
         company.setCurrentEmployeeCount(0);
         company.setCompanyAdmin(savedAdmin);
         company.setStatus(CompanyStatus.ACTIVE);
-        company.setSubscriptionStartDate(LocalDateTime.now());
-        company.setSubscriptionEndDate(LocalDateTime.now().plusYears(1));
+        company.setSubscriptionStartDate(LocalDateTime.now(IST_ZONE));
+        company.setSubscriptionEndDate(LocalDateTime.now(IST_ZONE).plusYears(1));
         company.setDocumentsVerified(false);
 
         Company savedCompany = companyRepository.save(company);
@@ -208,33 +228,49 @@ public class CompanyService {
         }
 
         if (companyDTO.getGstNumber() != null && !companyDTO.getGstNumber().trim().isEmpty()) {
-            if (!companyDTO.getGstNumber().equals(company.getGstNumber()) &&
-                    companyRepository.existsByGstNumber(companyDTO.getGstNumber())) {
+            String gst = companyDTO.getGstNumber().trim().toUpperCase();
+            if (!gst.matches("^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")) {
+                throw new BusinessException("Invalid GST number format");
+            }
+            if (!gst.equals(company.getGstNumber()) &&
+                    companyRepository.existsByGstNumber(gst)) {
                 throw new BusinessException("GST number already registered");
             }
+            company.setGstNumber(gst);
+        } else {
+            company.setGstNumber(null);
         }
 
         if (companyDTO.getPanNumber() != null && !companyDTO.getPanNumber().trim().isEmpty()) {
-            if (!companyDTO.getPanNumber().equals(company.getPanNumber()) &&
-                    companyRepository.existsByPanNumber(companyDTO.getPanNumber())) {
+            String pan = companyDTO.getPanNumber().trim().toUpperCase();
+            if (!pan.matches("^[A-Z]{5}[0-9]{4}[A-Z]{1}$")) {
+                throw new BusinessException("Invalid PAN number format");
+            }
+            if (!pan.equals(company.getPanNumber()) &&
+                    companyRepository.existsByPanNumber(pan)) {
                 throw new BusinessException("PAN number already registered");
             }
+            company.setPanNumber(pan);
+        } else {
+            company.setPanNumber(null);
         }
 
         company.setName(companyDTO.getName());
         company.setEmail(companyDTO.getEmail());
-        company.setPhone(companyDTO.getPhone());
-        company.setAddress(companyDTO.getAddress());
-        company.setCity(companyDTO.getCity());
-        company.setState(companyDTO.getState());
-        company.setCountry(companyDTO.getCountry());
-        company.setPostalCode(companyDTO.getPostalCode());
-        company.setWebsite(companyDTO.getWebsite());
-        company.setTaxId(companyDTO.getTaxId());
-        company.setRegistrationNumber(companyDTO.getRegistrationNumber());
-        company.setDescription(companyDTO.getDescription());
-        company.setGstNumber(companyDTO.getGstNumber());
-        company.setPanNumber(companyDTO.getPanNumber());
+        company.setPhone(companyDTO.getPhone() != null && !companyDTO.getPhone().trim().isEmpty() ? companyDTO.getPhone().trim() : null);
+        company.setAddress(companyDTO.getAddress() != null && !companyDTO.getAddress().trim().isEmpty() ? companyDTO.getAddress().trim() : null);
+        company.setCity(companyDTO.getCity() != null && !companyDTO.getCity().trim().isEmpty() ? companyDTO.getCity().trim() : null);
+        company.setState(companyDTO.getState() != null && !companyDTO.getState().trim().isEmpty() ? companyDTO.getState().trim() : null);
+        company.setCountry(companyDTO.getCountry() != null && !companyDTO.getCountry().trim().isEmpty() ? companyDTO.getCountry().trim() : null);
+        company.setPostalCode(companyDTO.getPostalCode() != null && !companyDTO.getPostalCode().trim().isEmpty() ? companyDTO.getPostalCode().trim() : null);
+        company.setWebsite(companyDTO.getWebsite() != null && !companyDTO.getWebsite().trim().isEmpty() ? companyDTO.getWebsite().trim() : null);
+        company.setTaxId(companyDTO.getTaxId() != null && !companyDTO.getTaxId().trim().isEmpty() ? companyDTO.getTaxId().trim() : null);
+        company.setRegistrationNumber(companyDTO.getRegistrationNumber() != null && !companyDTO.getRegistrationNumber().trim().isEmpty() ? companyDTO.getRegistrationNumber().trim() : null);
+        company.setDescription(companyDTO.getDescription() != null && !companyDTO.getDescription().trim().isEmpty() ? companyDTO.getDescription().trim() : null);
+
+        if (companyDTO.getStatus() != null) {
+            company.setStatus(companyDTO.getStatus());
+        }
 
         if (companyDTO.getEmployeeLimit() != null) {
             if (companyDTO.getEmployeeLimit() < company.getCurrentEmployeeCount()) {
@@ -244,6 +280,37 @@ public class CompanyService {
                 );
             }
             company.setEmployeeLimit(companyDTO.getEmployeeLimit());
+        }
+
+        // Update company admin details if provided
+        if (company.getCompanyAdmin() != null) {
+            User admin = company.getCompanyAdmin();
+            boolean adminUpdated = false;
+            if (companyDTO.getAdminFirstName() != null && !companyDTO.getAdminFirstName().trim().isEmpty()) {
+                admin.setFirstName(companyDTO.getAdminFirstName().trim());
+                adminUpdated = true;
+            }
+            if (companyDTO.getAdminLastName() != null && !companyDTO.getAdminLastName().trim().isEmpty()) {
+                admin.setLastName(companyDTO.getAdminLastName().trim());
+                adminUpdated = true;
+            }
+            if (companyDTO.getAdminEmail() != null && !companyDTO.getAdminEmail().trim().isEmpty()) {
+                String newAdminEmail = companyDTO.getAdminEmail().trim();
+                if (!newAdminEmail.equalsIgnoreCase(admin.getEmail())) {
+                    if (userRepository.existsByEmail(newAdminEmail)) {
+                        throw new BusinessException("Admin email already in use: " + newAdminEmail);
+                    }
+                    admin.setEmail(newAdminEmail);
+                    adminUpdated = true;
+                }
+            }
+            if (companyDTO.getAdminPhone() != null) {
+                admin.setPhoneNumber(companyDTO.getAdminPhone().trim().isEmpty() ? null : companyDTO.getAdminPhone().trim());
+                adminUpdated = true;
+            }
+            if (adminUpdated) {
+                userRepository.save(admin);
+            }
         }
 
         Company updatedCompany = companyRepository.save(company);
@@ -376,13 +443,17 @@ public class CompanyService {
         Company company = companyRepository.findById(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Company not found with ID: " + companyId));
 
+        if (status == CompanyStatus.INACTIVE) {
+            status = CompanyStatus.DEACTIVATED;
+        }
+
         company.setStatus(status);
 
         if (company.getCompanyAdmin() != null) {
             User admin = company.getCompanyAdmin();
             if (status == CompanyStatus.ACTIVE) {
                 admin.setStatus(UserStatus.ACTIVE);
-            } else if (status == CompanyStatus.DEACTIVATED) {
+            } else if (status == CompanyStatus.DEACTIVATED || status == CompanyStatus.INACTIVE) {
                 admin.setStatus(UserStatus.DEACTIVE);
             }
             userRepository.save(admin);
@@ -391,23 +462,30 @@ public class CompanyService {
         Company updatedCompany = companyRepository.save(company);
 
         String statusText = status == CompanyStatus.ACTIVE ? "activated" : "deactivated";
-        notificationEventService.notifySuperAdminsWithSave(
-                "Company Status Changed",
-                "Company " + company.getName() + " has been " + statusText + ".",
-                NotificationType.COMPANY_STATUS_CHANGED,
-                "company_details"
-        );
-
-        if (company.getCompanyAdmin() != null) {
-            notificationEventService.notifyUserPushOnly(
-                    company.getCompanyAdmin().getId(),
+        try {
+            notificationEventService.notifySuperAdminsWithSave(
                     "Company Status Changed",
-                    "Your company has been " + statusText + ".",
+                    "Company " + company.getName() + " has been " + statusText + ".",
                     NotificationType.COMPANY_STATUS_CHANGED,
                     "company_details"
             );
+        } catch (Exception e) {
+            log.warn("Failed to notify super admins on company status change: {}", e.getMessage());
         }
 
+        if (company.getCompanyAdmin() != null) {
+            try {
+                notificationEventService.notifyUserPushOnly(
+                        company.getCompanyAdmin().getId(),
+                        "Company Status Changed",
+                        "Your company has been " + statusText + ".",
+                        NotificationType.COMPANY_STATUS_CHANGED,
+                        "company_details"
+                );
+            } catch (Exception e) {
+                log.warn("Failed to notify company admin on company status change: {}", e.getMessage());
+            }
+        }
 
         log.info("Company status updated successfully for ID: {}", companyId);
         return convertToDTO(updatedCompany);
@@ -572,7 +650,7 @@ public class CompanyService {
                 doc.setFileUrl(url);
                 doc.setFileType(file.getContentType());
                 doc.setFileSize(file.getSize());
-                doc.setUploadedAt(LocalDateTime.now());
+                doc.setUploadedAt(LocalDateTime.now(IST_ZONE));
                 doc.setUploadedBy(uploadedById);
                 documentRepository.save(doc);
 

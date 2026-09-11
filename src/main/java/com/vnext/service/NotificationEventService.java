@@ -103,6 +103,18 @@ public class NotificationEventService {
         }
     }
 
+    @Async
+    public void notifyUserOtherDevicesPushOnly(Long userId, String currentDeviceToken, String title, String body, NotificationType type, String screen) {
+        if (userId == null) return;
+        var payload = NotificationPayload.builder()
+                .title(title)
+                .body(body)
+                .type(type)
+                .screen(screen)
+                .build();
+        pushNotificationService.sendToUserExcludingDevice(userId, currentDeviceToken, payload);
+    }
+
     public List<Long> getCompanyAdminUserIds(Long companyId) {
         java.util.Set<Long> adminIds = new java.util.HashSet<>();
         if (companyId != null) {
