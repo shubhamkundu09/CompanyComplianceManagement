@@ -67,7 +67,7 @@ public class AssignmentService {
                         subConfig.setTemplate(null);
                         subConfig.setSubTemplate(subCC.getSubTemplate());
                         subConfig.setFrequency(parentConfig.getFrequency() != null ? parentConfig.getFrequency() : ComplianceFrequency.YEARLY);
-                        subConfig.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : LocalDate.now().plusMonths(1));
+                        subConfig.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : parentAssign.getDueDate());
                         subConfig.setIsActive(true);
                         subConfig.setConfiguredBy(parentConfig.getConfiguredBy());
                         subConfig = configRepository.save(subConfig);

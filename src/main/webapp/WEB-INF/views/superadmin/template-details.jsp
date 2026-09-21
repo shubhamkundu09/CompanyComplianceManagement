@@ -1763,7 +1763,7 @@
                 </div>
 
                 <div id="configQuarterlySection" style="display:none;margin-bottom:16px;">
-                    <div class="grid-2">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
                         <div>
                             <label class="form-label">Quarter</label>
                             <select id="configDueQuarter" class="form-input">
@@ -1771,6 +1771,14 @@
                                <option value="2">Q2 (Jul-Sep)</option>
                                <option value="3">Q3 (Oct-Dec)</option>
                                <option value="4">Q4 (Jan-Mar)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label">Quarter Due Month</label>
+                            <select id="configDueMonthQ" class="form-input">
+                               <option value="3">Month 3 (Jun, Sep, Dec, Mar)</option>
+                               <option value="1">Month 1 (Apr, Jul, Oct, Jan)</option>
+                               <option value="2">Month 2 (May, Aug, Nov, Feb)</option>
                             </select>
                         </div>
                         <div>
@@ -1785,12 +1793,23 @@
                 </div>
 
                 <div id="configHalfYearlySection" style="display:none;margin-bottom:16px;">
-                    <div class="grid-2">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
                         <div>
                             <label class="form-label">Half Year</label>
                             <select id="configDueHalf" class="form-input">
-                                <option value="1">First Half (Jan-Jun)</option>
-                                <option value="2">Second Half (Jul-Dec)</option>
+                                <option value="1">First Half (Apr-Sep)</option>
+                                <option value="2">Second Half (Oct-Mar)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label">Half Due Month</label>
+                            <select id="configDueMonthH" class="form-input">
+                                <option value="6">End of Half (Sep, Mar)</option>
+                                <option value="1">Month 1 (Apr, Oct)</option>
+                                <option value="2">Month 2 (May, Nov)</option>
+                                <option value="3">Month 3 (Jun, Dec)</option>
+                                <option value="4">Month 4 (Jul, Jan)</option>
+                                <option value="5">Month 5 (Aug, Feb)</option>
                             </select>
                         </div>
                         <div>
@@ -3108,17 +3127,31 @@
                document.getElementById('configDueDayOfMonth').value = c.dueDayOfMonth;
            }
        } else if (frequency === 'QUARTERLY') {
-           // Set quarter and day of month
+           // Set quarter, due month and day of month
            if (c.dueQuarter) {
                document.getElementById('configDueQuarter').value = c.dueQuarter;
+           }
+           if (c.dueMonth) {
+               var mVal = c.dueMonth;
+               if (mVal > 3) mVal = ((mVal - 1) % 3) + 1;
+               document.getElementById('configDueMonthQ').value = mVal;
+           } else {
+               document.getElementById('configDueMonthQ').value = "3";
            }
            if (c.dueDayOfMonth) {
                document.getElementById('configDueDayOfMonthQ').value = c.dueDayOfMonth;
            }
        } else if (frequency === 'HALF_YEARLY') {
-           // Set half and day of month
+           // Set half, due month and day of month
            if (c.dueHalf) {
                document.getElementById('configDueHalf').value = c.dueHalf;
+           }
+           if (c.dueMonth) {
+               var mVal = c.dueMonth;
+               if (mVal > 6) mVal = ((mVal - 1) % 6) + 1;
+               document.getElementById('configDueMonthH').value = mVal;
+           } else {
+               document.getElementById('configDueMonthH').value = "6";
            }
            if (c.dueDayOfMonth) {
                document.getElementById('configDueDayOfMonthH').value = c.dueDayOfMonth;
@@ -3219,9 +3252,11 @@
           payload.dueDayOfMonth = parseInt(document.getElementById("configDueDayOfMonth").value);
       } else if (frequency === "QUARTERLY") {
           payload.dueQuarter = parseInt(document.getElementById("configDueQuarter").value);
+          payload.dueMonth = parseInt(document.getElementById("configDueMonthQ").value);
           payload.dueDayOfMonth = parseInt(document.getElementById("configDueDayOfMonthQ").value);
       } else if (frequency === "HALF_YEARLY") {
           payload.dueHalf = parseInt(document.getElementById("configDueHalf").value);
+          payload.dueMonth = parseInt(document.getElementById("configDueMonthH").value);
           payload.dueDayOfMonth = parseInt(document.getElementById("configDueDayOfMonthH").value);
       } else if (frequency === "YEARLY") {
           payload.dueMonth = parseInt(document.getElementById("configDueMonth").value);

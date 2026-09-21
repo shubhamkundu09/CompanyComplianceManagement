@@ -24,9 +24,17 @@ public class DocumentStorageService {
     private static final long MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
     public DocumentStorageService(FileStorageProperties props) throws IOException {
-        this.storageLocation = Paths.get(props.getUploadDir()).toAbsolutePath().normalize();
+        Path targetDir;
+        try {
+            targetDir = Paths.get(props.getUploadDir()).toAbsolutePath().normalize();
+            Files.createDirectories(targetDir);
+        } catch (Exception e) {
+            log.warn("Could not create storage directory '{}': {}. Falling back to 'uploads/documents/'", props.getUploadDir(), e.getMessage());
+            targetDir = Paths.get("uploads/documents/").toAbsolutePath().normalize();
+            Files.createDirectories(targetDir);
+        }
+        this.storageLocation = targetDir;
         this.baseUrl = props.getBaseUrl();
-        Files.createDirectories(this.storageLocation);
         log.info("Document storage location: {}", this.storageLocation);
     }
 

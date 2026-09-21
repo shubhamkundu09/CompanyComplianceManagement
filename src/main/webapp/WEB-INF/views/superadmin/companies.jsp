@@ -1354,7 +1354,7 @@
                     </div>
                     <div>
                         <label class="form-label">User Limit</label>
-                        <input type="number" id="add_limit" class="form-input" value="100" min="1">
+                        <input type="number" id="add_limit" class="form-input" value="5" min="1">
                     </div>
                     <div class="col-2">
                         <label class="form-label">Description</label>
@@ -1887,7 +1887,7 @@
             if (el) el.value = '';
         }
         var lim = document.getElementById('add_limit');
-        if (lim) lim.value = '100';
+        if (lim) lim.value = '5';
         pendingFiles = [];
         document.getElementById('filePreviewList').innerHTML = '';
         document.getElementById('docFiles').value = '';
@@ -1955,7 +1955,7 @@
             state: document.getElementById('add_state').value.trim() || null,
             country: document.getElementById('add_country').value.trim() || null,
             postalCode: document.getElementById('add_postal').value.trim() || null,
-            employeeLimit: parseInt(document.getElementById('add_limit').value) || 100,
+            employeeLimit: parseInt(document.getElementById('add_limit').value) || 5,
             description: document.getElementById('add_desc').value.trim() || null,
             adminFirstName: adminFirst,
             adminLastName: adminLast,

@@ -1839,7 +1839,7 @@
                 </div>
 
                 <div id="configQuarterlySection" style="display:none;" class="form-group">
-                    <div class="grid-2">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
                         <div>
                             <label class="form-label">Quarter</label>
                             <select id="configDueQuarter" class="form-input">
@@ -1847,6 +1847,14 @@
                                 <option value="2">Q2 (Jul-Sep)</option>
                                 <option value="3">Q3 (Oct-Dec)</option>
                                 <option value="4">Q4 (Jan-Mar)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label">Quarter Due Month</label>
+                            <select id="configDueMonthQ" class="form-input">
+                                <option value="3">Month 3 (Jun, Sep, Dec, Mar)</option>
+                                <option value="1">Month 1 (Apr, Jul, Oct, Jan)</option>
+                                <option value="2">Month 2 (May, Aug, Nov, Feb)</option>
                             </select>
                         </div>
                         <div>
@@ -1861,12 +1869,23 @@
                 </div>
 
                 <div id="configHalfYearlySection" style="display:none;" class="form-group">
-                    <div class="grid-2">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
                         <div>
                             <label class="form-label">Half Year</label>
                             <select id="configDueHalf" class="form-input">
-                                <option value="1">First Half (Jan-Jun)</option>
-                                <option value="2">Second Half (Jul-Dec)</option>
+                                <option value="1">First Half (Apr-Sep)</option>
+                                <option value="2">Second Half (Oct-Mar)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label">Half Due Month</label>
+                            <select id="configDueMonthH" class="form-input">
+                                <option value="6">End of Half (Sep, Mar)</option>
+                                <option value="1">Month 1 (Apr, Oct)</option>
+                                <option value="2">Month 2 (May, Nov)</option>
+                                <option value="3">Month 3 (Jun, Dec)</option>
+                                <option value="4">Month 4 (Jul, Jan)</option>
+                                <option value="5">Month 5 (Aug, Feb)</option>
                             </select>
                         </div>
                         <div>
@@ -2972,6 +2991,27 @@
             document.getElementById('configReminderDays').value = config.reminderDaysBefore || 10;
             document.getElementById('configRepeatReminder').value = config.repeatReminder !== false ? 'true' : 'false';
             document.getElementById('configReminderIntervalDays').value = config.reminderIntervalDays || 3;
+            if (config.dueDayOfMonth) {
+                document.getElementById('configDueDayOfMonth').value = config.dueDayOfMonth;
+                document.getElementById('configDueDayOfMonthQ').value = config.dueDayOfMonth;
+                document.getElementById('configDueDayOfMonthH').value = config.dueDayOfMonth;
+                document.getElementById('configDueDayOfMonthY').value = config.dueDayOfMonth;
+            }
+            if (config.dueQuarter) document.getElementById('configDueQuarter').value = config.dueQuarter;
+            if (config.dueHalf) document.getElementById('configDueHalf').value = config.dueHalf;
+            if (config.dueMonth) {
+                document.getElementById('configDueMonth').value = config.dueMonth;
+                var qMonthVal = config.dueMonth;
+                if (qMonthVal > 3) {
+                    qMonthVal = ((qMonthVal - 1) % 3) + 1;
+                }
+                document.getElementById('configDueMonthQ').value = qMonthVal;
+                var hMonthVal = config.dueMonth;
+                if (hMonthVal > 6) {
+                    hMonthVal = ((hMonthVal - 1) % 6) + 1;
+                }
+                document.getElementById('configDueMonthH').value = hMonthVal;
+            }
             showConfigSections(config.frequency || '');
         } else {
             document.getElementById('configFrequency').value = '';
@@ -2982,6 +3022,15 @@
             document.getElementById('configReminderDays').value = '10';
             document.getElementById('configRepeatReminder').value = 'true';
             document.getElementById('configReminderIntervalDays').value = '3';
+            document.getElementById('configDueDayOfMonth').value = '1';
+            document.getElementById('configDueDayOfMonthQ').value = '1';
+            document.getElementById('configDueDayOfMonthH').value = '1';
+            document.getElementById('configDueDayOfMonthY').value = '1';
+            document.getElementById('configDueQuarter').value = '1';
+            document.getElementById('configDueHalf').value = '1';
+            document.getElementById('configDueMonth').value = '1';
+            document.getElementById('configDueMonthQ').value = '1';
+            document.getElementById('configDueMonthH').value = '1';
             showConfigSections('');
         }
 
@@ -3010,6 +3059,27 @@
             document.getElementById('configReminderDays').value = sub.reminderDaysBefore || 10;
             document.getElementById('configRepeatReminder').value = sub.repeatReminder !== false ? 'true' : 'false';
             document.getElementById('configReminderIntervalDays').value = sub.reminderIntervalDays || 3;
+            if (sub.dueDayOfMonth) {
+                document.getElementById('configDueDayOfMonth').value = sub.dueDayOfMonth;
+                document.getElementById('configDueDayOfMonthQ').value = sub.dueDayOfMonth;
+                document.getElementById('configDueDayOfMonthH').value = sub.dueDayOfMonth;
+                document.getElementById('configDueDayOfMonthY').value = sub.dueDayOfMonth;
+            }
+            if (sub.dueQuarter) document.getElementById('configDueQuarter').value = sub.dueQuarter;
+            if (sub.dueHalf) document.getElementById('configDueHalf').value = sub.dueHalf;
+            if (sub.dueMonth) {
+                document.getElementById('configDueMonth').value = sub.dueMonth;
+                var qMonthVal = sub.dueMonth;
+                if (qMonthVal > 3) {
+                    qMonthVal = ((qMonthVal - 1) % 3) + 1;
+                }
+                document.getElementById('configDueMonthQ').value = qMonthVal;
+                var hMonthVal = sub.dueMonth;
+                if (hMonthVal > 6) {
+                    hMonthVal = ((hMonthVal - 1) % 6) + 1;
+                }
+                document.getElementById('configDueMonthH').value = hMonthVal;
+            }
             showConfigSections(sub.frequency || '');
         } else {
             document.getElementById('configFrequency').value = '';
@@ -3020,6 +3090,15 @@
             document.getElementById('configReminderDays').value = '10';
             document.getElementById('configRepeatReminder').value = 'true';
             document.getElementById('configReminderIntervalDays').value = '3';
+            document.getElementById('configDueDayOfMonth').value = '1';
+            document.getElementById('configDueDayOfMonthQ').value = '1';
+            document.getElementById('configDueDayOfMonthH').value = '1';
+            document.getElementById('configDueDayOfMonthY').value = '1';
+            document.getElementById('configDueQuarter').value = '1';
+            document.getElementById('configDueHalf').value = '1';
+            document.getElementById('configDueMonth').value = '1';
+            document.getElementById('configDueMonthQ').value = '1';
+            document.getElementById('configDueMonthH').value = '1';
             showConfigSections('');
         }
 
@@ -3098,9 +3177,11 @@
             payload.dueDayOfMonth = parseInt(document.getElementById('configDueDayOfMonth').value);
         } else if (frequency === 'QUARTERLY') {
             payload.dueQuarter = parseInt(document.getElementById('configDueQuarter').value);
+            payload.dueMonth = parseInt(document.getElementById('configDueMonthQ').value);
             payload.dueDayOfMonth = parseInt(document.getElementById('configDueDayOfMonthQ').value);
         } else if (frequency === 'HALF_YEARLY') {
             payload.dueHalf = parseInt(document.getElementById('configDueHalf').value);
+            payload.dueMonth = parseInt(document.getElementById('configDueMonthH').value);
             payload.dueDayOfMonth = parseInt(document.getElementById('configDueDayOfMonthH').value);
         } else if (frequency === 'YEARLY') {
             payload.dueMonth = parseInt(document.getElementById('configDueMonth').value);

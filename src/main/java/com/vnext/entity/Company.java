@@ -45,7 +45,7 @@ public class Company extends BaseEntity {
     @Column(nullable = false)
     private CompanyStatus status = CompanyStatus.ACTIVE;
 
-    private Integer employeeLimit = 100;
+    private Integer employeeLimit = 5;
     private Integer currentEmployeeCount = 0;
 
     private LocalDateTime subscriptionStartDate;

@@ -126,7 +126,7 @@ public class CompanyService {
         company.setDescription(companyDTO.getDescription());
         company.setGstNumber(companyDTO.getGstNumber());
         company.setPanNumber(companyDTO.getPanNumber());
-        company.setEmployeeLimit(companyDTO.getEmployeeLimit() != null ? companyDTO.getEmployeeLimit() : 100);
+        company.setEmployeeLimit(companyDTO.getEmployeeLimit() != null ? companyDTO.getEmployeeLimit() : 5);
         company.setCurrentEmployeeCount(0);
         company.setCompanyAdmin(savedAdmin);
         company.setStatus(CompanyStatus.ACTIVE);

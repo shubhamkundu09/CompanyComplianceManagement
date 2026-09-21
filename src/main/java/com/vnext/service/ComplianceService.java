@@ -814,12 +814,12 @@ public class ComplianceService {
             config.setRepeatReminder(null);
             config.setReminderIntervalDays(null);
         } else {
-            config.setDueDate(dto.getDueDate());
             config.setCustomDueDate(dto.getCustomDueDate());
             config.setDueDayOfMonth(dto.getDueDayOfMonth());
             config.setDueQuarter(dto.getDueQuarter());
             config.setDueHalf(dto.getDueHalf());
             config.setDueMonth(dto.getDueMonth());
+            config.setDueDate(dto.getDueDate() != null ? dto.getDueDate() : calculateEffectiveDueDate(config));
             config.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
             config.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
             config.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);
@@ -895,12 +895,12 @@ public class ComplianceService {
             templateConfig.setRepeatReminder(null);
             templateConfig.setReminderIntervalDays(null);
         } else {
-            templateConfig.setDueDate(dto.getDueDate());
             templateConfig.setCustomDueDate(dto.getCustomDueDate());
             templateConfig.setDueDayOfMonth(dto.getDueDayOfMonth());
             templateConfig.setDueQuarter(dto.getDueQuarter());
             templateConfig.setDueHalf(dto.getDueHalf());
             templateConfig.setDueMonth(dto.getDueMonth());
+            templateConfig.setDueDate(dto.getDueDate() != null ? dto.getDueDate() : calculateEffectiveDueDate(templateConfig));
             templateConfig.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
             templateConfig.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
             templateConfig.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);
@@ -982,12 +982,12 @@ public class ComplianceService {
                 companyConfig.setRepeatReminder(null);
                 companyConfig.setReminderIntervalDays(null);
             } else {
-                companyConfig.setDueDate(templateConfig.getDueDate());
                 companyConfig.setCustomDueDate(templateConfig.getCustomDueDate());
                 companyConfig.setDueDayOfMonth(templateConfig.getDueDayOfMonth());
                 companyConfig.setDueQuarter(templateConfig.getDueQuarter());
                 companyConfig.setDueHalf(templateConfig.getDueHalf());
                 companyConfig.setDueMonth(templateConfig.getDueMonth());
+                companyConfig.setDueDate(templateConfig.getDueDate() != null ? templateConfig.getDueDate() : calculateEffectiveDueDate(companyConfig));
                 companyConfig.setReminderDaysBefore(templateConfig.getReminderDaysBefore());
                 companyConfig.setRepeatReminder(templateConfig.getRepeatReminder());
                 companyConfig.setReminderIntervalDays(templateConfig.getReminderIntervalDays());
@@ -1061,12 +1061,12 @@ public class ComplianceService {
             config.setRepeatReminder(false);
             config.setReminderIntervalDays(null);
         } else {
-            config.setDueDate(dto.getDueDate());
             config.setCustomDueDate(dto.getCustomDueDate());
             config.setDueDayOfMonth(dto.getDueDayOfMonth());
             config.setDueQuarter(dto.getDueQuarter());
             config.setDueHalf(dto.getDueHalf());
             config.setDueMonth(dto.getDueMonth());
+            config.setDueDate(dto.getDueDate() != null ? dto.getDueDate() : calculateEffectiveDueDate(config));
             config.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
             config.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
             config.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);
@@ -1079,6 +1079,9 @@ public class ComplianceService {
         config.setUpdatedBy(adminId);
 
         ComplianceConfig saved = configRepository.save(config);
+        if (saved.getDueDate() != null) {
+            assignmentRepository.updateDueDateForConfig(saved.getId(), saved.getDueDate());
+        }
         log.info("Configuration updated successfully: {}", saved.getId());
 
         List<Long> companyAdminUserIds = new ArrayList<>();
@@ -1157,12 +1160,12 @@ public class ComplianceService {
             config.setRepeatReminder(false);
             config.setReminderIntervalDays(null);
         } else {
-            config.setDueDate(dto.getDueDate());
             config.setCustomDueDate(dto.getCustomDueDate());
             config.setDueDayOfMonth(dto.getDueDayOfMonth());
             config.setDueQuarter(dto.getDueQuarter());
             config.setDueHalf(dto.getDueHalf());
             config.setDueMonth(dto.getDueMonth());
+            config.setDueDate(dto.getDueDate() != null ? dto.getDueDate() : calculateEffectiveDueDate(config));
             config.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
             config.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
             config.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);
@@ -1533,7 +1536,7 @@ public class ComplianceService {
                 assignment = new EmployeeAssignment();
                 assignment.setConfig(config);
                 assignment.setEmployeeId(employeeId);
-                assignment.setDueDate(config.getDueDate() != null ? config.getDueDate() : calculateDueDate(config));
+                assignment.setDueDate(config.getDueDate() != null ? config.getDueDate() : calculateEffectiveDueDate(config));
                 assignment.setAssignedAt(LocalDateTime.now(IST_ZONE));
                 assignment.setIsActive(true);
                 assignment.setIsSubAssignment(companyCompliance != null && !companyCompliance.isParent());
@@ -1622,9 +1625,15 @@ if (parentCC == null) {
             parentConfig.setTemplate(null);
             parentConfig.setSubTemplate(null);
             parentConfig.setFrequency(ComplianceFrequency.YEARLY);
-            parentConfig.setDueDate(LocalDate.now().plusMonths(1));
+            parentConfig.setDueDate(calculateEffectiveDueDate(parentConfig));
             parentConfig.setIsActive(true);
             parentConfig.setConfiguredBy(adminId);
+            parentConfig = configRepository.save(parentConfig);
+        }
+
+        LocalDate parentDueDate = parentConfig.getDueDate() != null ? parentConfig.getDueDate() : calculateEffectiveDueDate(parentConfig);
+        if (parentConfig.getDueDate() == null && parentDueDate != null) {
+            parentConfig.setDueDate(parentDueDate);
             parentConfig = configRepository.save(parentConfig);
         }
 
@@ -1656,6 +1665,9 @@ if (parentCC == null) {
                 parentAssign = existingParentAssign.get();
                 parentAssign.setIsActive(true);
                 parentAssign.setIsSubAssignment(false);
+                if (parentAssign.getDueDate() == null && parentDueDate != null) {
+                    parentAssign.setDueDate(parentDueDate);
+                }
                 if (parentCC.getStatus() == ComplianceStatus.COMPLETED || parentCC.getCompletedAt() != null) {
                     if (parentAssign.getCompletedAt() == null) {
                         parentAssign.setCompletedAt(parentCC.getCompletedAt() != null ? parentCC.getCompletedAt() : LocalDateTime.now(IST_ZONE));
@@ -1669,7 +1681,7 @@ if (parentCC == null) {
                 parentAssign = new EmployeeAssignment();
                 parentAssign.setConfig(parentConfig);
                 parentAssign.setEmployeeId(employeeId);
-                parentAssign.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : LocalDate.now().plusMonths(1));
+                parentAssign.setDueDate(parentDueDate);
                 parentAssign.setAssignedAt(LocalDateTime.now(IST_ZONE));
                 parentAssign.setIsActive(true);
                 parentAssign.setIsSubAssignment(false);
@@ -1693,7 +1705,8 @@ if (parentCC == null) {
                         subConfig.setTemplate(null);
                         subConfig.setSubTemplate(subCC.getSubTemplate());
                         subConfig.setFrequency(parentConfig.getFrequency() != null ? parentConfig.getFrequency() : ComplianceFrequency.YEARLY);
-                        subConfig.setDueDate(parentConfig.getDueDate() != null ? parentConfig.getDueDate() : LocalDate.now().plusMonths(1));
+                        LocalDate calculatedSubDue = calculateEffectiveDueDate(subConfig);
+                        subConfig.setDueDate(calculatedSubDue != null ? calculatedSubDue : parentDueDate);
                         subConfig.setIsActive(true);
                         subConfig.setConfiguredBy(adminId);
                         subConfig = configRepository.save(subConfig);
@@ -1702,7 +1715,7 @@ if (parentCC == null) {
                     Optional<EmployeeAssignment> existingSubAssign = assignmentRepository
                             .findByConfigIdAndEmployeeIdAndIsActiveTrue(subConfig.getId(), employeeId);
 
-                    LocalDate subDueDate = subConfig.getDueDate() != null ? subConfig.getDueDate() : parentAssign.getDueDate();
+                    LocalDate subDueDate = subConfig.getDueDate() != null ? subConfig.getDueDate() : (subConfig.getFrequency() != null ? calculateEffectiveDueDate(subConfig) : parentDueDate);
                     boolean subAlreadyCompleted = subCC.getStatus() == ComplianceStatus.COMPLETED || subCC.getCompletedAt() != null;
 
                     if (existingSubAssign.isEmpty()) {
@@ -2874,53 +2887,8 @@ if (parentCC == null) {
 
     // ==================== HELPERS ====================
 
-    private LocalDate calculateDueDate(ComplianceConfig config) {
-        if (config == null || config.getFrequency() == null) {
-            return null;
-        }
-
-        LocalDate today = LocalDate.now();
-        int currentMonth = today.getMonthValue();
-        int currentYear = today.getYear();
-        int fiscalYear = (currentMonth >= 4) ? currentYear : currentYear - 1;
-
-        switch (config.getFrequency()) {
-            case ONE_TIME:
-                return config.getCustomDueDate();
-            case MONTHLY:
-                int dayOfMonth = config.getDueDayOfMonth() != null ? config.getDueDayOfMonth() : 15;
-                int lastDay = today.lengthOfMonth();
-                return LocalDate.of(today.getYear(), today.getMonth(), Math.min(dayOfMonth, lastDay));
-            case QUARTERLY:
-                int quarter = config.getDueQuarter() != null ? config.getDueQuarter() : 1;
-                int monthOffset = (quarter - 1) * 3;
-                int month = 4 + monthOffset;
-                int year = fiscalYear;
-                if (month > 12) {
-                    month -= 12;
-                    year += 1;
-                }
-                int qDay = config.getDueDayOfMonth() != null ? config.getDueDayOfMonth() : 15;
-                LocalDate firstOfMonth = LocalDate.of(year, month, 1);
-                int lastDayOfMonth = firstOfMonth.lengthOfMonth();
-                return LocalDate.of(year, month, Math.min(qDay, lastDayOfMonth));
-            case HALF_YEARLY:
-                int half = config.getDueHalf() != null ? config.getDueHalf() : 1;
-                int hMonth = (half == 1) ? 4 : 10;
-                int hDay = config.getDueDayOfMonth() != null ? config.getDueDayOfMonth() : 15;
-                int hYear = fiscalYear;
-                LocalDate hFirst = LocalDate.of(hYear, hMonth, 1);
-                int hLast = hFirst.lengthOfMonth();
-                return LocalDate.of(hYear, hMonth, Math.min(hDay, hLast));
-            case YEARLY:
-                int yearMonth = config.getDueMonth() != null ? config.getDueMonth() : 1;
-                int yDay = config.getDueDayOfMonth() != null ? config.getDueDayOfMonth() : 15;
-                LocalDate yFirst = LocalDate.of(today.getYear(), yearMonth, 1);
-                int yLast = yFirst.lengthOfMonth();
-                return LocalDate.of(today.getYear(), yearMonth, Math.min(yDay, yLast));
-            default:
-                return null;
-        }
+    LocalDate calculateDueDate(ComplianceConfig config) {
+        return calculateEffectiveDueDate(config);
     }
 
     public LocalDate calculateEffectiveDueDate(ComplianceConfig config) {
@@ -2928,21 +2896,29 @@ if (parentCC == null) {
             return null;
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(IST_ZONE);
         int currentMonth = today.getMonthValue();
         int currentYear = today.getYear();
         int fiscalYear = (currentMonth >= 4) ? currentYear : currentYear - 1;
 
         switch (config.getFrequency()) {
             case ONE_TIME:
-                return config.getCustomDueDate();
+                return config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate();
             case MONTHLY:
                 int dayOfMonth = config.getDueDayOfMonth() != null ? config.getDueDayOfMonth() : 15;
                 int lastDay = today.lengthOfMonth();
                 return LocalDate.of(today.getYear(), today.getMonth(), Math.min(dayOfMonth, lastDay));
             case QUARTERLY:
                 int quarter = config.getDueQuarter() != null ? config.getDueQuarter() : 1;
-                int monthOffset = (quarter - 1) * 3;
+                int monthInQuarter = 1;
+                if (config.getDueMonth() != null) {
+                    if (config.getDueMonth() >= 1 && config.getDueMonth() <= 3) {
+                        monthInQuarter = config.getDueMonth();
+                    } else if (config.getDueMonth() >= 4 && config.getDueMonth() <= 12) {
+                        monthInQuarter = ((config.getDueMonth() - 1) % 3) + 1;
+                    }
+                }
+                int monthOffset = (quarter - 1) * 3 + (monthInQuarter - 1);
                 int month = 4 + monthOffset;
                 int year = fiscalYear;
                 if (month > 12) {
@@ -2955,9 +2931,22 @@ if (parentCC == null) {
                 return LocalDate.of(year, month, Math.min(qDay, lastDayOfMonth));
             case HALF_YEARLY:
                 int half = config.getDueHalf() != null ? config.getDueHalf() : 1;
-                int hMonth = (half == 1) ? 4 : 10;
-                int hDay = config.getDueDayOfMonth() != null ? config.getDueDayOfMonth() : 15;
+                int monthInHalf = 1;
+                if (config.getDueMonth() != null) {
+                    if (config.getDueMonth() >= 1 && config.getDueMonth() <= 6) {
+                        monthInHalf = config.getDueMonth();
+                    } else if (config.getDueMonth() >= 7 && config.getDueMonth() <= 12) {
+                        monthInHalf = ((config.getDueMonth() - 1) % 6) + 1;
+                    }
+                }
+                int hMonthOffset = (half - 1) * 6 + (monthInHalf - 1);
+                int hMonth = 4 + hMonthOffset;
                 int hYear = fiscalYear;
+                if (hMonth > 12) {
+                    hMonth -= 12;
+                    hYear += 1;
+                }
+                int hDay = config.getDueDayOfMonth() != null ? config.getDueDayOfMonth() : 15;
                 LocalDate hFirst = LocalDate.of(hYear, hMonth, 1);
                 int hLast = hFirst.lengthOfMonth();
                 return LocalDate.of(hYear, hMonth, Math.min(hDay, hLast));
@@ -2977,7 +2966,7 @@ if (parentCC == null) {
             Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(companyCompliance.getId());
             if (configOpt.isPresent()) {
                 ComplianceConfig config = configOpt.get();
-                return calculateEffectiveDueDate(config);
+                return config.getDueDate() != null ? config.getDueDate() : calculateEffectiveDueDate(config);
             }
             return null;
         }
@@ -2993,6 +2982,9 @@ if (parentCC == null) {
         }
 
         LocalDate currentDueDate = config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate();
+        if (currentDueDate == null) {
+            currentDueDate = calculateEffectiveDueDate(config);
+        }
         if (currentDueDate == null) {
             return null;
         }
@@ -3080,12 +3072,12 @@ if (parentCC == null) {
                 config.setRepeatReminder(null);
                 config.setReminderIntervalDays(null);
             } else {
-                config.setDueDate(dto.getDueDate());
                 config.setCustomDueDate(dto.getCustomDueDate());
                 config.setDueDayOfMonth(dto.getDueDayOfMonth());
                 config.setDueQuarter(dto.getDueQuarter());
                 config.setDueHalf(dto.getDueHalf());
                 config.setDueMonth(dto.getDueMonth());
+                config.setDueDate(dto.getDueDate() != null ? dto.getDueDate() : calculateEffectiveDueDate(config));
                 config.setReminderDaysBefore(dto.getReminderDaysBefore() != null ? dto.getReminderDaysBefore() : 10);
                 config.setRepeatReminder(dto.getRepeatReminder() != null ? dto.getRepeatReminder() : true);
                 config.setReminderIntervalDays(dto.getReminderIntervalDays() != null ? dto.getReminderIntervalDays() : 3);

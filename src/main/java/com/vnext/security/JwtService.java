@@ -27,6 +27,14 @@ public class JwtService {
     @Value("${jwt.refresh-expiration}")
     private Long refreshExpiration;
 
+    public Long getExpiration() {
+        return expiration != null ? expiration : 15552000000L;
+    }
+
+    public Long getRefreshExpiration() {
+        return refreshExpiration != null ? refreshExpiration : 31536000000L;
+    }
+
     private SecretKey getSigningKey() {
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
         return Keys.hmacShaKeyFor(keyBytes);

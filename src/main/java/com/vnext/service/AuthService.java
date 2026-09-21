@@ -90,7 +90,7 @@ public class AuthService {
             );
         }
 
-        return new AuthResponse(accessToken, refreshToken, "Bearer", 86400000L, userDTO);
+        return new AuthResponse(accessToken, refreshToken, "Bearer", jwtService.getExpiration(), userDTO);
     }
 
     private UserDTO mapToUserDTO(User user) {
