@@ -287,7 +287,7 @@ public class AssignmentService {
         }
 
         // Push to SuperAdmins
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Completed",
                 "Company " + companyName + " completed compliance \"" + complianceName + "\" and marked as completed.",
                 NotificationType.COMPLIANCE_COMPLETED,
@@ -552,7 +552,7 @@ public class AssignmentService {
         }
 
         // 4. Push to SuperAdmins
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Completed",
                 "Company " + companyName + " completed compliance \"" + complianceName + "\" and marked as completed.",
                 NotificationType.COMPLIANCE_COMPLETED,

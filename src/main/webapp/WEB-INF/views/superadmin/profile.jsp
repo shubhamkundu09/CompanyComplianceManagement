@@ -810,9 +810,9 @@
             <i class="fas fa-tags"></i> Categories
         </a>
 
-        <div class="sidebar-label">Communication</div>
+        <div class="sidebar-label">Push Settings</div>
         <a href="${baseUrl}/super-admin/notifications" class="nav-item">
-            <i class="fas fa-bell"></i> Notifications
+            <i class="fas fa-mobile-alt"></i> FCM Push Settings
         </a>
 
         <div class="sidebar-label">Account</div>
@@ -842,24 +842,25 @@
 
             <!-- Notifications -->
             <div style="position:relative;">
-                <button class="header-btn" onclick="toggleNotifications()" title="Notifications">
+                <button class="header-btn" onclick="toggleNotifications()" title="FCM Push Alerts">
                     <i class="fas fa-bell"></i>
                     <span class="badge-count" id="notifBadge">0</span>
                 </button>
 
                 <div class="notification-dropdown" id="notificationDropdown">
                     <div class="notification-header">
-                        <h4><i class="fas fa-bell" style="color:var(--primary);margin-right:8px;"></i> Notifications</h4>
+                        <h4><i class="fas fa-mobile-alt" style="color:var(--primary);margin-right:8px;"></i> FCM Push Alerts</h4>
                         <span class="mark-all" onclick="markAllRead()">Mark all as read</span>
                     </div>
                     <div id="notificationList">
                         <div class="notification-empty">
-                            <i class="fas fa-spinner fa-spin"></i>
-                            <div style="margin-top:8px;">Loading...</div>
+                            <i class="fas fa-check-circle" style="color:var(--success);"></i>
+                            <div style="margin-top:6px;font-weight:600;">Push Notifications Active</div>
+                            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">Dispatched to device drawers</div>
                         </div>
                     </div>
                     <div class="notification-footer">
-                        <a href="${baseUrl}/super-admin/notifications">View all notifications</a>
+                        <a href="${baseUrl}/super-admin/notifications">FCM Push Settings & Logs</a>
                     </div>
                 </div>
             </div>
@@ -1114,62 +1115,48 @@
     }
 
    async function loadDropdownNotifications() {
-       try {
-           var data = await api('/api/notifications/active');
-           var list = document.getElementById('notificationList');
-           if (!list) return;
+        try {
+            var res = await api('/api/super-admin/notification-schedule/metrics');
+            var list = document.getElementById('notificationList');
+            var badge = document.getElementById('notifBadge');
+            if (!list) return;
 
-           if (data && data.success && data.data && data.data.length > 0) {
-               var html = '';
-               for (var i = 0; i < Math.min(data.data.length, 10); i++) {
-                   var n = data.data[i];
-                   var dotClass = 'general';
-                   if (n.notificationType === 'URGENT') dotClass = 'urgent';
-                   else if (n.notificationType === 'IMPORTANT') dotClass = 'important';
+            if (res && res.success && res.data) {
+                var logs = res.data.recentLogs || [];
+                if (badge) {
+                    badge.textContent = res.data.todayPushesCount !== undefined ? res.data.todayPushesCount : logs.length;
+                }
 
-                   html += '<div class="notification-item">' +
-                       '<div class="notif-title">' +
-                       '<span class="notif-dot ' + dotClass + '"></span>' +
-                       escapeHtml(n.title) +
-                       '</div>' +
-                       '<div class="notif-message">' + escapeHtml(n.message) + '</div>' +
-                       '<div class="notif-time"><i class="far fa-clock"></i> ' + formatTimeAgo(n.createdAt) + '</div>' +
-                       '</div>';
-               }
-               if (data.data.length > 10) {
-                   html += '<div style="padding:12px 20px;text-align:center;color:var(--gray-500);font-size:12px;">+ ' + (data.data.length - 10) + ' more</div>';
-               }
-               list.innerHTML = html;
+                if (logs.length > 0) {
+                    var html = '';
+                    for (var i = 0; i < Math.min(logs.length, 5); i++) {
+                        var log = logs[i];
+                        var statusTag = (log.failureCount && log.failureCount > 0)
+                            ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.1);color:#ef4444;font-weight:600;">' + (log.successCount || 0) + ' sent, ' + log.failureCount + ' failed</span>'
+                            : '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(16,185,129,0.1);color:#10b981;font-weight:600;">' + (log.successCount || log.recipientCount || 0) + ' delivered</span>';
 
-               // Only update badge if element exists
-               var badge = document.getElementById('notifBadge');
-               if (badge) {
-                   badge.textContent = data.data.length;
-               }
-               var notifCount = document.getElementById('notifCount');
-               if (notifCount) {
-                   notifCount.textContent = data.data.length;
-               }
-           } else {
-               list.innerHTML = '<div class="notification-empty">' +
-                   '<i class="fas fa-bell-slash"></i>' +
-                   '<div>No notifications</div>' +
-                   '</div>';
-
-               var badge = document.getElementById('notifBadge');
-               if (badge) {
-                   badge.textContent = '0';
-               }
-               var notifCount = document.getElementById('notifCount');
-               if (notifCount) {
-                   notifCount.textContent = '0';
-               }
-           }
-       } catch(e) {
-           console.log('Notification error:', e);
-           // Don't show error to user, just silently fail
-       }
-   }
+                        html += '<div class="notification-item" style="padding:10px 14px;border-bottom:1px solid rgba(226,232,240,0.6);">' +
+                            '<div class="notif-title" style="display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;color:var(--gray-800);">' +
+                            '<span><i class="fas fa-paper-plane" style="color:var(--primary);margin-right:6px;font-size:11px;"></i>' + escapeHtml(log.title || 'Push Alert') + '</span>' +
+                            statusTag +
+                            '</div>' +
+                            '<div class="notif-message" style="font-size:12px;color:var(--gray-500);margin-top:3px;line-height:1.4;">' + escapeHtml(log.body || '') + '</div>' +
+                            '<div class="notif-time" style="font-size:11px;color:var(--gray-400);margin-top:4px;"><i class="far fa-clock"></i> ' + (log.timeAgo || 'Recently') + ' &bull; ' + (log.recipientCount || 0) + ' targets</div>' +
+                            '</div>';
+                    }
+                    list.innerHTML = html;
+                } else {
+                    list.innerHTML = '<div class="notification-empty" style="text-align:center;padding:24px 16px;">' +
+                        '<i class="fas fa-check-circle" style="color:var(--success);font-size:24px;"></i>' +
+                        '<div style="margin-top:8px;font-weight:600;color:var(--gray-700);">FCM Push Active</div>' +
+                        '<div style="font-size:11px;color:var(--gray-400);margin-top:2px;">Next: ' + (res.data.nextRunFormatted || 'Scheduled') + '</div>' +
+                        '</div>';
+                }
+            }
+        } catch(e) {
+            console.log('FCM Notification error:', e);
+        }
+    }
 
     function markAllRead() {
         toast('All notifications marked as read', 'success');

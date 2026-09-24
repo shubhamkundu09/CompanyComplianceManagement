@@ -14,6 +14,9 @@ public interface ComplianceHistoryRepository extends JpaRepository<ComplianceHis
     // Add this method for finding by company compliance ID
     List<ComplianceHistory> findByCompanyComplianceId(Long companyComplianceId);
 
-    // Optional: Add method to delete by company compliance ID
     void deleteByCompanyComplianceId(Long companyComplianceId);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("DELETE FROM ComplianceHistory ch WHERE ch.companyCompliance.id IN :complianceIds")
+    void deleteAllByCompanyComplianceIdIn(@org.springframework.data.repository.query.Param("complianceIds") List<Long> complianceIds);
 }

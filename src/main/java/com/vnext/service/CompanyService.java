@@ -35,15 +35,15 @@ public class CompanyService {
     private final CompanyDocumentRepository documentRepository;
     private final DocumentStorageService documentStorageService;
     private final ComplianceService complianceService;
-    private final CompanyDocumentRepository companyDocumentRepository;
     private final CompanyComplianceRepository companyComplianceRepository;
     private final ComplianceConfigRepository complianceConfigRepository;
     private final EmployeeAssignmentRepository employeeAssignmentRepository;
     private final ComplianceHistoryRepository complianceHistoryRepository;
     private final ComplianceDocumentRepository complianceDocumentRepository;
-    private final ComplianceSubTemplateRepository complianceSubTemplateRepository; // if needed
+    private final ComplianceSubTemplateRepository complianceSubTemplateRepository;
     private final ComplianceTemplateRepository complianceTemplateRepository;
     private final NotificationEventService notificationEventService;
+    private final DeviceTokenRepository deviceTokenRepository;
 
     // ==================== COMPANY CRUD ====================
 
@@ -163,7 +163,7 @@ public class CompanyService {
 
         log.info("Company created successfully with ID: {}", savedCompany.getId());
         // Push-only to SuperAdmins
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Company Created",
                 "Company " + savedCompany.getName() + " has been created.",
                 NotificationType.COMPANY_CREATED,
@@ -315,7 +315,7 @@ public class CompanyService {
 
         Company updatedCompany = companyRepository.save(company);
         log.info("Company updated successfully with ID: {}", updatedCompany.getId());
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Company Updated",
                 "Company " + company.getName() + " has been updated.",
                 NotificationType.COMPANY_UPDATED,
@@ -337,102 +337,135 @@ public class CompanyService {
 
     @Transactional
     public void deleteCompany(Long companyId) {
-        log.info("Permanently deleting company with ID: {}", companyId);
+        log.info("Permanently deleting company ID={} — starting explicit FK-safe deletion sequence", companyId);
 
         Company company = companyRepository.findById(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Company not found with ID: " + companyId));
+        String companyName = company.getName();
 
-        // 1. Delete all employees (EMPLOYEE role) and their assignments
-        List<User> employees = userRepository.findByCompanyIdAndRoleAndDeletedFalse(
-                companyId, UserRole.EMPLOYEE, Pageable.unpaged()).getContent();
-        for (User employee : employees) {
-            // Delete employee assignments (if any) – assignments are not FK to User, only have employeeId
-            List<EmployeeAssignment> assignments = employeeAssignmentRepository
-                    .findByEmployeeIdAndIsActiveTrue(employee.getId());
-            if (!assignments.isEmpty()) {
-                employeeAssignmentRepository.deleteAll(assignments);
-            }
-            // Delete the employee user
-            userRepository.delete(employee);
+        // ── STEP 1: Collect all users that belong to this company ─────────────────
+        // Use findAllByCompanyId to catch all users regardless of role, status, or soft-deleted flag.
+        List<User> allCompanyUsers = new ArrayList<>(userRepository.findAllByCompanyId(companyId));
+        if (company.getCompanyAdmin() != null && !allCompanyUsers.contains(company.getCompanyAdmin())) {
+            allCompanyUsers.add(company.getCompanyAdmin());
         }
 
-        // 2. Delete company admin (if exists)
-        User admin = company.getCompanyAdmin();
-        if (admin != null) {
-            // Admin might have no assignments, but delete anyway
-            userRepository.delete(admin);
+        // ── STEP 2: Collect ALL CompanyCompliances (active AND soft-deleted) ──────
+        List<CompanyCompliance> allCompliances = companyComplianceRepository.findAllByCompanyIdRaw(companyId);
+
+        // ── STEP 3: Collect company-specific sub-templates & templates ───────────
+        List<ComplianceSubTemplate> companySubTemplates = complianceSubTemplateRepository.findByCompanyId(companyId);
+        List<ComplianceTemplate> companyTemplates = complianceTemplateRepository.findByCompanyId(companyId);
+
+        log.info("Company ID={}: found {} users, {} compliances, {} company sub-templates, {} company templates to delete",
+                companyId, allCompanyUsers.size(), allCompliances.size(), companySubTemplates.size(), companyTemplates.size());
+
+        // ── STEP 4: Delete EmployeeAssignments (FK → compliance_configs) ──────────
+        // 4a. Assignments for company compliances
+        for (CompanyCompliance cc : allCompliances) {
+            complianceConfigRepository.findByCompanyComplianceId(cc.getId()).ifPresent(config -> {
+                employeeAssignmentRepository.deleteByConfigId(config.getId());
+                log.debug("Deleted assignments for company compliance config ID={}", config.getId());
+            });
         }
-
-        // 3. Delete all CompanyCompliances and their associated records
-        List<CompanyCompliance> companyCompliances = companyComplianceRepository
-                .findByCompanyIdAndIsActiveTrueAndDeletedFalse(companyId);
-        for (CompanyCompliance cc : companyCompliances) {
-            // 3a. Delete EmployeeAssignments linked to this compliance config
-            complianceConfigRepository.findByCompanyComplianceId(cc.getId())
-                    .ifPresent(config -> {
-                        List<EmployeeAssignment> assignments = employeeAssignmentRepository
-                                .findByConfigIdAndIsActiveTrue(config.getId());
-                        if (!assignments.isEmpty()) {
-                            employeeAssignmentRepository.deleteAll(assignments);
-                        }
-                        // 3b. Delete the config itself
-                        complianceConfigRepository.delete(config);
-                    });
-
-            // 3c. Delete ComplianceHistory
-            List<ComplianceHistory> histories = complianceHistoryRepository
-                    .findByCompanyComplianceId(cc.getId());
-            if (!histories.isEmpty()) {
-                complianceHistoryRepository.deleteAll(histories);
+        // 4b. Assignments for company sub-templates
+        for (ComplianceSubTemplate sub : companySubTemplates) {
+            List<ComplianceConfig> subConfigs = complianceConfigRepository.findAllBySubTemplateId(sub.getId());
+            for (ComplianceConfig cfg : subConfigs) {
+                employeeAssignmentRepository.deleteByConfigId(cfg.getId());
+                complianceConfigRepository.delete(cfg);
             }
-
-            // 3d. Delete ComplianceDocuments
-            List<ComplianceDocument> docs = complianceDocumentRepository
-                    .findByCompanyComplianceId(cc.getId());
-            if (!docs.isEmpty()) {
-                complianceDocumentRepository.deleteAll(docs);
-            }
-
-            // 3e. Delete the CompanyCompliance itself
-            companyComplianceRepository.delete(cc);
         }
-
-        // 4. Delete company-specific compliance templates (isCompanySpecific = true)
-        List<ComplianceTemplate> customTemplates = complianceTemplateRepository
-                .findByCompanyIdAndIsCompanySpecificTrueAndIsActiveTrueOrderByPriorityAsc(companyId);
-        for (ComplianceTemplate template : customTemplates) {
-            // Delete sub-templates (and their configs) – this is handled by template deletion cascade?
-            // We need to delete sub-templates manually if not cascaded.
-            // For simplicity, we delete sub-templates first.
-            List<ComplianceSubTemplate> subTemplates = complianceSubTemplateRepository
-                    .findByParentTemplateIdAndDeletedFalseOrderByDisplayOrderAsc(template.getId());
-            for (ComplianceSubTemplate sub : subTemplates) {
-                // Delete any template-level config for this sub (companyComplianceId = null)
-                complianceConfigRepository.findBySubTemplateIdAndCompanyComplianceIsNull(sub.getId())
-                        .ifPresent(complianceConfigRepository::delete);
+        // 4c. Assignments for company templates & their sub-templates
+        for (ComplianceTemplate tpl : companyTemplates) {
+            List<ComplianceSubTemplate> tplSubTemplates = complianceSubTemplateRepository.findAllByParentTemplateId(tpl.getId());
+            for (ComplianceSubTemplate sub : tplSubTemplates) {
+                List<ComplianceConfig> subConfigs = complianceConfigRepository.findAllBySubTemplateId(sub.getId());
+                for (ComplianceConfig cfg : subConfigs) {
+                    employeeAssignmentRepository.deleteByConfigId(cfg.getId());
+                    complianceConfigRepository.delete(cfg);
+                }
                 complianceSubTemplateRepository.delete(sub);
             }
-            // Delete the template itself
-            complianceTemplateRepository.delete(template);
+            List<ComplianceConfig> tplConfigs = complianceConfigRepository.findAllByTemplateId(tpl.getId());
+            for (ComplianceConfig cfg : tplConfigs) {
+                employeeAssignmentRepository.deleteByConfigId(cfg.getId());
+                complianceConfigRepository.delete(cfg);
+            }
+        }
+        // 4d. Assignments directly assigned to any company user
+        for (User u : allCompanyUsers) {
+            List<EmployeeAssignment> userAssignments = employeeAssignmentRepository.findAllByEmployeeId(u.getId());
+            if (!userAssignments.isEmpty()) {
+                employeeAssignmentRepository.deleteAll(userAssignments);
+            }
         }
 
-        // 5. Delete all CompanyDocuments
-        List<CompanyDocument> companyDocs = companyDocumentRepository.findByCompanyIdOrderByUploadedAtDesc(companyId);
-        if (!companyDocs.isEmpty()) {
-            companyDocumentRepository.deleteAll(companyDocs);
+        // ── STEP 5: Delete ComplianceHistory & ComplianceDocuments (FK → company_compliances)
+        for (CompanyCompliance cc : allCompliances) {
+            complianceHistoryRepository.deleteByCompanyComplianceId(cc.getId());
+            complianceDocumentRepository.deleteByCompanyComplianceId(cc.getId());
         }
 
-        // 6. Finally, delete the Company
+        // ── STEP 6: Delete ComplianceConfigs (FK → company_compliances) ──────────
+        for (CompanyCompliance cc : allCompliances) {
+            complianceConfigRepository.findByCompanyComplianceId(cc.getId())
+                    .ifPresent(complianceConfigRepository::delete);
+        }
+
+        // ── STEP 7: Delete CompanyCompliances (FK → companies) ───────────────────
+        if (!allCompliances.isEmpty()) {
+            companyComplianceRepository.deleteAll(allCompliances);
+            companyComplianceRepository.flush();
+            log.debug("Deleted {} company_compliances for company ID={}", allCompliances.size(), companyId);
+        }
+
+        // ── STEP 8: Delete remaining ComplianceSubTemplates (FK → companies) ─────
+        // This directly resolves FK constraint `FKawvimx6wp7nq7o9rdlb4q7gnl`
+        if (!companySubTemplates.isEmpty()) {
+            complianceSubTemplateRepository.deleteAll(companySubTemplates);
+            complianceSubTemplateRepository.flush();
+            log.debug("Deleted {} company sub-templates for company ID={}", companySubTemplates.size(), companyId);
+        }
+
+        // ── STEP 9: Delete remaining ComplianceTemplates (FK → companies) ────────
+        if (!companyTemplates.isEmpty()) {
+            complianceTemplateRepository.deleteAll(companyTemplates);
+            complianceTemplateRepository.flush();
+            log.debug("Deleted {} company templates for company ID={}", companyTemplates.size(), companyId);
+        }
+
+        // ── STEP 10: Delete CompanyDocuments (FK → companies) ────────────────────
+        documentRepository.deleteByCompanyId(companyId);
+
+        // ── STEP 11: Delete DeviceTokens BEFORE Users (FK → users) ───────────────
+        for (User u : allCompanyUsers) {
+            deviceTokenRepository.deleteAllByUserId(u.getId());
+        }
+        deviceTokenRepository.flush();
+
+        // ── STEP 12: Break company_admin_id FK and delete Users ───────────────────
+        company.setCompanyAdmin(null);
+        companyRepository.saveAndFlush(company);
+
+        for (User u : allCompanyUsers) {
+            userRepository.delete(u);
+        }
+        userRepository.flush();
+        log.debug("Deleted {} users for company ID={}", allCompanyUsers.size(), companyId);
+
+        // ── STEP 13: Delete the Company root record ───────────────────────────────
         companyRepository.delete(company);
+        companyRepository.flush();
+        log.info("Company ID={} ('{}') permanently deleted — all child records removed", companyId, companyName);
 
-        notificationEventService.notifySuperAdminsWithSave(
+        // ── STEP 14: Notify SuperAdmins ──────────────────────────────────────────
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Company Deleted",
-                "Company " + company.getName() + " has been permanently deleted.",
+                "Company '" + companyName + "' has been permanently deleted.",
                 NotificationType.COMPANY_DELETED,
                 "companies"
         );
-
-        log.info("Company with ID: {} permanently deleted", companyId);
     }
 
 
@@ -463,7 +496,7 @@ public class CompanyService {
 
         String statusText = status == CompanyStatus.ACTIVE ? "activated" : "deactivated";
         try {
-            notificationEventService.notifySuperAdminsWithSave(
+            notificationEventService.notifySuperAdminsPushOnly(
                     "Company Status Changed",
                     "Company " + company.getName() + " has been " + statusText + ".",
                     NotificationType.COMPANY_STATUS_CHANGED,
@@ -708,7 +741,7 @@ public class CompanyService {
         log.info("Subscription extended for company {}", companyId);
 
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Subscription Extended",
                 "Subscription for " + company.getName() + " extended by " + additionalMonths + " months.",
                 NotificationType.SUBSCRIPTION_EXTENDED,

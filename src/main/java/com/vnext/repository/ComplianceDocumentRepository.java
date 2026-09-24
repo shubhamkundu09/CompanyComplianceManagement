@@ -13,6 +13,9 @@ public interface ComplianceDocumentRepository extends JpaRepository<ComplianceDo
     void deleteByCompanyComplianceId(Long companyComplianceId);
 
  
-    // Add to ComplianceDocumentRepository.java
     List<ComplianceDocument> findByCompanyComplianceId(Long companyComplianceId);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("DELETE FROM ComplianceDocument cd WHERE cd.companyCompliance.id IN :complianceIds")
+    void deleteAllByCompanyComplianceIdIn(@org.springframework.data.repository.query.Param("complianceIds") List<Long> complianceIds);
 }

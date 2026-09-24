@@ -60,4 +60,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     @Query("SELECT u FROM User u WHERE u.company.id = :companyId AND u.deleted = false")
     List<User> findAllByCompanyIdAndDeletedFalse(@Param("companyId") Long companyId);
+
+    @Query("SELECT u FROM User u WHERE u.company.id = :companyId")
+    List<User> findAllByCompanyId(@Param("companyId") Long companyId);
 }

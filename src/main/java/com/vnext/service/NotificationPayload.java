@@ -15,6 +15,7 @@ public class NotificationPayload {
     private NotificationType type;
     private Long notificationId;
     private String screen;
+    private String traceId;
     private Map<String, Object> extra;
 
     public Map<String, String> getData() {
@@ -22,6 +23,13 @@ public class NotificationPayload {
         if (type != null) map.put("type", type.name());
         if (notificationId != null) map.put("notificationId", notificationId.toString());
         if (screen != null) map.put("screen", screen);
+        if (traceId != null && !traceId.isBlank()) {
+            map.put("traceId", traceId);
+        } else {
+            String generated = java.util.UUID.randomUUID().toString();
+            this.traceId = generated;
+            map.put("traceId", generated);
+        }
         if (extra != null) {
             extra.forEach((k, v) -> map.put(k, v.toString()));
         }

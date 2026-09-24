@@ -161,7 +161,7 @@ public class EmployeeService {
             );
         }
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Employee Created",
                 "Employee " + savedEmployee.getFullName() + " has been added to " + company.getName() + ".",
                 NotificationType.EMPLOYEE_CREATED,
@@ -266,7 +266,7 @@ public class EmployeeService {
             );
         }
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Employee Removed",
                 "Employee " + employee.getFullName() + " has been removed from " + (employee.getCompany() != null ? employee.getCompany().getName() : "company") + ".",
                 NotificationType.EMPLOYEE_DELETED,

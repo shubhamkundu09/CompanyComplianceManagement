@@ -54,6 +54,9 @@ public interface ComplianceConfigRepository extends JpaRepository<ComplianceConf
     @Query("SELECT c FROM ComplianceConfig c WHERE c.template.id = :templateId")
     List<ComplianceConfig> findAllByTemplateId(@Param("templateId") Long templateId);
 
+    @Query("SELECT c FROM ComplianceConfig c WHERE c.subTemplate.id = :subTemplateId")
+    List<ComplianceConfig> findAllBySubTemplateId(@Param("subTemplateId") Long subTemplateId);
+
 
 
 
@@ -70,11 +73,11 @@ public interface ComplianceConfigRepository extends JpaRepository<ComplianceConf
     @Query("SELECT c.id FROM ComplianceConfig c WHERE c.subTemplate.id = :subTemplateId")
     List<Long> findConfigIdsBySubTemplateId(@Param("subTemplateId") Long subTemplateId);
 
+    @Query("SELECT c FROM ComplianceConfig c WHERE c.companyCompliance.id IN :complianceIds")
+    List<ComplianceConfig> findAllByCompanyComplianceIdIn(@Param("complianceIds") List<Long> complianceIds);
 
-
-
-
-
-
-
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM ComplianceConfig c WHERE c.id IN :configIds")
+    void deleteAllByIdIn(@Param("configIds") List<Long> configIds);
 }

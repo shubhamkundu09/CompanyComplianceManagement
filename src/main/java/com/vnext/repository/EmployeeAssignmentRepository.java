@@ -22,6 +22,9 @@ public interface EmployeeAssignmentRepository extends JpaRepository<EmployeeAssi
 
     List<EmployeeAssignment> findByEmployeeIdAndIsActiveTrue(Long employeeId);
 
+    @Query("SELECT ea FROM EmployeeAssignment ea WHERE ea.employeeId = :employeeId")
+    List<EmployeeAssignment> findAllByEmployeeId(@Param("employeeId") Long employeeId);
+
     Optional<EmployeeAssignment> findByConfigIdAndEmployeeIdAndIsActiveTrue(Long configId, Long employeeId);
 
     boolean existsByConfigIdAndEmployeeIdAndIsActiveTrue(Long configId, Long employeeId);
@@ -101,4 +104,9 @@ public interface EmployeeAssignmentRepository extends JpaRepository<EmployeeAssi
     @Modifying
     @Query("DELETE FROM EmployeeAssignment e WHERE e.config.id IN :configIds")
     void deleteByConfigIds(@Param("configIds") List<Long> configIds);
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM EmployeeAssignment e WHERE e.employeeId IN :employeeIds")
+    void deleteAllByEmployeeIdIn(@Param("employeeIds") List<Long> employeeIds);
 }

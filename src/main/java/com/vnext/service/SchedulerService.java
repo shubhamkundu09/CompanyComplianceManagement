@@ -32,6 +32,7 @@ public class SchedulerService {
     private final ComplianceConfigRepository configRepository;
     private final NotificationEventService notificationEventService;
     private final CompanyRepository companyRepository;
+    private final NotificationScheduleConfigRepository scheduleConfigRepository;
 
     // ─── 1. RECURRING COMPLIANCE RENEWAL ──────────────────────────────────────
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Kolkata") // daily at 00:05 IST
@@ -193,7 +194,7 @@ public class SchedulerService {
             }
 
             // 3. Push to all SuperAdmins
-            notificationEventService.notifySuperAdminsWithSave(
+            notificationEventService.notifySuperAdminsPushOnly(
                     "Compliance Overdue",
                     "Company " + companyName + " is overdue on compliance \"" + complianceName + "\" (Employee: " + employeeName + ").",
                     NotificationType.COMPLIANCE_OVERDUE,
@@ -209,52 +210,188 @@ public class SchedulerService {
         log.info("Overdue employee notifications sent for {} assignments.", overdueAssignments.size());
     }
 
-    // ─── 3. DUE REMINDERS (Push Notifications to CompanyAdmin & Assigned Employees) ───────────────────
-    @Scheduled(cron = "0 0 9,14,19 * * *", zone = "Asia/Kolkata") // 3 times daily at 09:00, 14:00, 19:00 IST
+    // ─── 3. DUE REMINDERS — DB-CONFIG-DRIVEN POLLER ─────────────────────────────
+    /**
+     * Polls every 5 minutes (configurable via scheduler.poll.interval-ms) and sends
+     * due-reminder notifications if the current IST time falls inside one of the
+     * evenly-distributed daily slots defined in NotificationScheduleConfig.
+     *
+     * Configuration key: "DUE_REMINDER"
+     * Defaults if the DB row does not yet exist:
+     *   enabled=true, timesPerDay=3, startHour=9, endHour=19
+     *
+     * Idempotency: sentTodayCount tracks how many slots have already fired today.
+     */
+    @Scheduled(fixedDelayString = "${scheduler.poll.interval-ms:30000}", initialDelay = 10000)
     @Transactional
     public void sendDueReminders() {
-        log.info("Checking due reminders (3x daily schedule)...");
+        LocalDateTime nowIst = LocalDateTime.now(IST_ZONE);
+        LocalDate todayIst = nowIst.toLocalDate();
+
+        // ── Load or create the DUE_REMINDER schedule config ──────────────────
+        NotificationScheduleConfig cfg = scheduleConfigRepository
+                .findByNotificationType("DUE_REMINDER")
+                .orElseGet(() -> scheduleConfigRepository.findByNotificationType("FCM_DUE_REMINDER")
+                        .orElseGet(() -> {
+                            NotificationScheduleConfig seed = new NotificationScheduleConfig();
+                            seed.setNotificationType("DUE_REMINDER");
+                            seed.setEnabled(true);
+                            seed.setTimesPerDay(3);
+                            seed.setStartHour(8);
+                            seed.setEndHour(20);
+                            seed.setSentTodayCount(0);
+                            return scheduleConfigRepository.save(seed);
+                        }));
+
+        if (!Boolean.TRUE.equals(cfg.getEnabled())) {
+            log.debug("DUE_REMINDER schedule is disabled — skipping.");
+            return;
+        }
+
+        int timesPerDay = Math.max(1, Math.min(20, cfg.getTimesPerDay() != null ? cfg.getTimesPerDay() : 3));
+        int startHour   = cfg.getStartHour()  != null ? cfg.getStartHour()  : 8;
+        int endHour     = cfg.getEndHour()    != null ? cfg.getEndHour()    : 20;
+
+        // Start-of-day anchor
+        LocalDateTime dayStart = todayIst.atTime(startHour, 0);
+
+        // ── Reset today counter if date changed or last send was before today's window start ───
+        if (!todayIst.equals(cfg.getLastSentDate()) || (cfg.getLastSentAt() != null && cfg.getLastSentAt().isBefore(dayStart))) {
+            cfg.setLastSentDate(todayIst);
+            cfg.setSentTodayCount(0);
+            cfg.setLastSentAt(null);
+        }
+
+        if (cfg.getSentTodayCount() != null && cfg.getSentTodayCount() > timesPerDay) {
+            cfg.setSentTodayCount(0);
+        }
+
+        // ── Already sent the full quota for today? ────────────────────────────
+        if (cfg.getSentTodayCount() >= timesPerDay) {
+            log.debug("DUE_REMINDER: already sent {} / {} times today — skipping.", cfg.getSentTodayCount(), timesPerDay);
+            return;
+        }
+
+        // ── Check if within active hours ──────────────────────────────────────
+        int currentHour = nowIst.getHour();
+        if (currentHour < startHour || currentHour > endHour) {
+            log.debug("DUE_REMINDER: current hour {} outside active window [{} – {}] — skipping.",
+                    currentHour, startHour, endHour);
+            return;
+        }
+
+        // Within endHour — allow last slot to fire even if current minute is past endHour:00
+        // This handles e.g. endHour=16, last slot at 16:00 firing at 16:01
+
+        // Interval in minutes between consecutive slots
+        double intervalMinutes = timesPerDay <= 1
+                ? 0
+                : ((endHour - startHour) * 60.0) / (timesPerDay - 1);
+
+        // Determine which slot index corresponds to current time
+        long minutesFromStart = Math.max(0, java.time.Duration.between(dayStart, nowIst).toMinutes());
+        int expectedSlotIndex = timesPerDay <= 1 ? 0 : (int) Math.floor(minutesFromStart / (intervalMinutes > 0 ? intervalMinutes : 1.0));
+        expectedSlotIndex = Math.max(0, Math.min(timesPerDay - 1, expectedSlotIndex));
+
+        int currentSentCount = cfg.getSentTodayCount() != null ? cfg.getSentTodayCount() : 0;
+
+        // If this slot has already fired today, wait for the next scheduled slot
+        if (currentSentCount > expectedSlotIndex) {
+            log.debug("DUE_REMINDER slot {}/{} already sent (currentSentCount={}) — waiting for next slot.",
+                    expectedSlotIndex + 1, timesPerDay, currentSentCount);
+            return;
+        }
+
+        LocalDateTime slotTime = timesPerDay <= 1
+                ? dayStart
+                : dayStart.plusMinutes(Math.round(intervalMinutes * expectedSlotIndex));
+
+        // Enforce cooldown between consecutive slot triggers (in seconds)
+        if (cfg.getLastSentAt() != null) {
+            long secondsSinceLast = java.time.Duration.between(cfg.getLastSentAt(), nowIst).getSeconds();
+            long minCooldownSeconds = Math.max(30, Math.min(1800, Math.round(intervalMinutes * 60.0 * 0.45)));
+            if (secondsSinceLast < minCooldownSeconds) {
+                log.debug("DUE_REMINDER cooldown active (last sent {}s ago, min cooldown {}s) — skipping.",
+                        secondsSinceLast, minCooldownSeconds);
+                return;
+            }
+        }
+
+        log.info("DUE_REMINDER: firing slot {}/{} (slot expected {}, now {})", expectedSlotIndex + 1, timesPerDay, slotTime, nowIst);
+
+        // ── Claim the slot immediately to prevent duplicate sends ─────────────
+        cfg.setSentTodayCount(expectedSlotIndex + 1);
+        cfg.setLastSentAt(nowIst);
+        cfg.setLastSentDate(todayIst);
+        scheduleConfigRepository.save(cfg);
+
+        // ── Execute reminder checks ──────────────────────────────────────────
+        executeDueReminderChecks();
+    }
+
+    /**
+     * Executes the actual due and overdue reminder check for both employee assignments
+     * and company-level compliances.
+     */
+    @Transactional
+    public void executeDueReminderChecks() {
         LocalDate today = LocalDate.now(IST_ZONE);
         LocalDate future = today.plusDays(60);
 
+        log.info("Checking compliance due and overdue reminders for date: {}...", today);
+
+        // ── 1. EMPLOYEE ASSIGNMENTS (Due Soon & Due Today) ──
         List<EmployeeAssignment> upcomingAssignments = assignmentRepository
                 .findActiveUpcomingAssignments(today, future);
 
-        if (upcomingAssignments.isEmpty()) {
-            log.info("No upcoming assignments for reminders.");
-        } else {
-            log.info("Found {} upcoming assignments for reminder check", upcomingAssignments.size());
+        log.info("Found {} upcoming/due-today employee assignments for reminder check", upcomingAssignments.size());
 
-            for (EmployeeAssignment assignment : upcomingAssignments) {
-                var config = assignment.getConfig();
-                if (config == null) continue;
-                LocalDate dueDate = assignment.getDueDate();
-                if (dueDate == null || !dueDate.isAfter(today)) continue;
+        for (EmployeeAssignment assignment : upcomingAssignments) {
+            var config = assignment.getConfig();
+            if (config == null) continue;
+            LocalDate dueDate = assignment.getDueDate();
+            if (dueDate == null) continue;
 
-                // Prevent sending duplicate push notifications within the same day across the 3 scheduled runs
-                if (today.equals(assignment.getLastReminderSent())) continue;
+            String complianceName = getComplianceName(assignment);
+            String employeeName = getUserName(assignment.getEmployeeId());
+            Long companyId = getCompanyIdFromAssignment(assignment);
+            String companyName = getCompanyNameFromAssignment(assignment);
+            List<Long> companyAdminIds = notificationEventService.getCompanyAdminUserIds(companyId);
 
-                int reminderDays = config.getReminderDaysBefore() != null ? config.getReminderDaysBefore() : 10;
-                int intervalDays = (config.getReminderIntervalDays() != null && config.getReminderIntervalDays() > 0) ? config.getReminderIntervalDays() : 3;
-                boolean repeat = config.getRepeatReminder() == null || Boolean.TRUE.equals(config.getRepeatReminder());
-                long daysRemaining = ChronoUnit.DAYS.between(today, dueDate);
+            if (dueDate.equals(today)) {
+                // DUE TODAY
+                notificationEventService.notifyUserPushOnly(
+                        assignment.getEmployeeId(),
+                        "Compliance Due TODAY",
+                        "Compliance \"" + complianceName + "\" is DUE TODAY (" + today + ")! Please complete and submit.",
+                        NotificationType.COMPLIANCE_DUE_SOON,
+                        "employee_compliance"
+                );
 
-                // Check if today falls on reminder schedule
-                boolean shouldSend = false;
-                if (daysRemaining <= reminderDays) {
-                    if (repeat) {
-                        shouldSend = (daysRemaining == reminderDays) || ((reminderDays - daysRemaining) % intervalDays == 0) || (daysRemaining == 1);
-                    } else {
-                        shouldSend = (daysRemaining == reminderDays) || (daysRemaining == 1);
-                    }
+                if (!companyAdminIds.isEmpty()) {
+                    notificationEventService.notifyUsersPushOnly(
+                            companyAdminIds,
+                            "Compliance Due TODAY",
+                            "Employee " + employeeName + " has compliance \"" + complianceName + "\" DUE TODAY (" + today + ").",
+                            NotificationType.COMPLIANCE_DUE_SOON,
+                            "compliance_details"
+                    );
                 }
+                notificationEventService.notifySuperAdminsPushOnly(
+                        "Compliance Due TODAY",
+                        "Company " + companyName + " has compliance \"" + complianceName + "\" (Employee: " + employeeName + ") DUE TODAY (" + today + ").",
+                        NotificationType.COMPLIANCE_DUE_SOON,
+                        "compliance_details"
+                );
+                assignment.setLastReminderSent(today);
+                assignmentRepository.save(assignment);
+            } else if (dueDate.isAfter(today)) {
+                // DUE SOON (NEARBY)
+                int reminderDays = config.getReminderDaysBefore() != null ? config.getReminderDaysBefore() : 10;
+                long daysRemaining = ChronoUnit.DAYS.between(today, dueDate);
+                boolean shouldSend = (daysRemaining <= reminderDays);
 
                 if (shouldSend) {
-                    String complianceName = getComplianceName(assignment);
-                    String employeeName = getUserName(assignment.getEmployeeId());
-                    Long companyId = getCompanyIdFromAssignment(assignment);
-
-                    // Push to assigned employee
                     notificationEventService.notifyUserPushOnly(
                             assignment.getEmployeeId(),
                             "Compliance Due Soon",
@@ -263,20 +400,22 @@ public class SchedulerService {
                             "employee_compliance"
                     );
 
-                    // Push to company admin
-                    if (companyId != null) {
-                        var companyAdmin = companyRepository.findById(companyId)
-                                .map(Company::getCompanyAdmin).orElse(null);
-                        if (companyAdmin != null) {
-                            notificationEventService.notifyUserPushOnly(
-                                    companyAdmin.getId(),
-                                    "Compliance Due Soon",
-                                    "Employee " + employeeName + " has compliance \"" + complianceName + "\" due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
-                                    NotificationType.COMPLIANCE_DUE_SOON,
-                                    "compliance_details"
-                            );
-                        }
+                    if (!companyAdminIds.isEmpty()) {
+                        notificationEventService.notifyUsersPushOnly(
+                                companyAdminIds,
+                                "Compliance Due Soon",
+                                "Employee " + employeeName + " has compliance \"" + complianceName + "\" due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
+                                NotificationType.COMPLIANCE_DUE_SOON,
+                                "compliance_details"
+                        );
                     }
+
+                    notificationEventService.notifySuperAdminsPushOnly(
+                            "Compliance Due Soon",
+                            "Company " + companyName + " has compliance \"" + complianceName + "\" (Employee: " + employeeName + ") due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + ".",
+                            NotificationType.COMPLIANCE_DUE_SOON,
+                            "compliance_details"
+                    );
 
                     assignment.setLastReminderSent(today);
                     assignmentRepository.save(assignment);
@@ -284,40 +423,148 @@ public class SchedulerService {
             }
         }
 
-        // ─── Company-Level Due Reminders (for active company compliances) ───
+        // ── 2. EMPLOYEE ASSIGNMENTS (Overdue) ──
+        List<EmployeeAssignment> overdueAssignments = assignmentRepository
+                .findByDueDateBeforeAndCompletedAtIsNullAndIsActiveTrue(today);
+
+        log.info("Found {} overdue employee assignments for reminder check", overdueAssignments.size());
+
+        for (EmployeeAssignment assignment : overdueAssignments) {
+            LocalDate dueDate = assignment.getDueDate();
+            if (dueDate == null) continue;
+
+            long daysOverdue = ChronoUnit.DAYS.between(dueDate, today);
+            String complianceName = getComplianceName(assignment);
+            String employeeName = getUserName(assignment.getEmployeeId());
+            Long companyId = getCompanyIdFromAssignment(assignment);
+            String companyName = getCompanyNameFromAssignment(assignment);
+            List<Long> companyAdminIds = notificationEventService.getCompanyAdminUserIds(companyId);
+
+            notificationEventService.notifyUserPushOnly(
+                    assignment.getEmployeeId(),
+                    "Compliance OVERDUE",
+                    "Compliance \"" + complianceName + "\" was due on " + dueDate + " and is OVERDUE by " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + "! Immediate submission required.",
+                    NotificationType.COMPLIANCE_OVERDUE,
+                    "employee_compliance"
+            );
+
+            if (!companyAdminIds.isEmpty()) {
+                notificationEventService.notifyUsersPushOnly(
+                        companyAdminIds,
+                        "Compliance OVERDUE",
+                        "Employee " + employeeName + " has overdue compliance \"" + complianceName + "\" (" + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " overdue).",
+                        NotificationType.COMPLIANCE_OVERDUE,
+                        "compliance_details"
+                );
+            }
+
+            notificationEventService.notifySuperAdminsPushOnly(
+                    "Compliance OVERDUE",
+                    "Company " + companyName + " has overdue compliance \"" + complianceName + "\" (Employee: " + employeeName + ", " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " overdue).",
+                    NotificationType.COMPLIANCE_OVERDUE,
+                    "compliance_details"
+            );
+        }
+
+        // ── 3. COMPANY-LEVEL COMPLIANCES (Due Soon, Due Today & Overdue) ──
         List<CompanyCompliance> activeCompanyCompliances = companyComplianceRepository.findAll().stream()
                 .filter(cc -> cc.getStatus() != ComplianceStatus.COMPLETED)
                 .filter(cc -> cc.getStatus() != ComplianceStatus.EXEMPTED)
-                .filter(cc -> cc.getIsActive() && !cc.isDeleted())
-                .filter(cc -> cc.getConfig() != null)
+                .filter(cc -> Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted())
                 .collect(Collectors.toList());
+
+        log.info("Found {} active company compliance records for reminder evaluation", activeCompanyCompliances.size());
 
         for (CompanyCompliance cc : activeCompanyCompliances) {
             ComplianceConfig config = cc.getConfig();
-            LocalDate dueDate = config.getDueDate() != null ? config.getDueDate() : complianceService.calculateEffectiveDueDate(config);
-            if (dueDate == null || !dueDate.isAfter(today) || dueDate.isAfter(future)) continue;
-
-            int reminderDays = config.getReminderDaysBefore() != null ? config.getReminderDaysBefore() : 10;
-            int intervalDays = (config.getReminderIntervalDays() != null && config.getReminderIntervalDays() > 0) ? config.getReminderIntervalDays() : 3;
-            boolean repeat = config.getRepeatReminder() == null || Boolean.TRUE.equals(config.getRepeatReminder());
-            long daysRemaining = ChronoUnit.DAYS.between(today, dueDate);
-
-            boolean shouldSend = false;
-            if (daysRemaining <= reminderDays) {
-                if (repeat) {
-                    shouldSend = (daysRemaining == reminderDays) || ((reminderDays - daysRemaining) % intervalDays == 0) || (daysRemaining == 1);
-                } else {
-                    shouldSend = (daysRemaining == reminderDays) || (daysRemaining == 1);
-                }
+            if (config == null) {
+                config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
+            }
+            if (config == null && cc.getSubTemplate() != null) {
+                config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+            }
+            if (config == null && cc.getTemplate() != null) {
+                config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+            }
+            if (config == null) {
+                continue;
             }
 
-            if (shouldSend) {
-                String complianceTitle = cc.getSubTemplate() != null ? cc.getSubTemplate().getName() : (cc.getTemplate() != null ? cc.getTemplate().getName() : "Compliance");
-                if (cc.getCompany() != null && cc.getCompany().getCompanyAdmin() != null) {
-                    notificationEventService.notifyUserPushOnly(
-                            cc.getCompany().getCompanyAdmin().getId(),
+            LocalDate dueDate = config.getDueDate();
+            if (dueDate == null) {
+                dueDate = config.getCustomDueDate();
+            }
+            if (dueDate == null) {
+                dueDate = complianceService.calculateEffectiveDueDate(config);
+            }
+            if (dueDate == null) {
+                continue;
+            }
+
+            String complianceTitle = cc.getSubTemplate() != null
+                    ? cc.getSubTemplate().getName()
+                    : (cc.getTemplate() != null ? cc.getTemplate().getName() : "Compliance");
+            Long companyId = cc.getCompany() != null ? cc.getCompany().getId() : null;
+            String companyName = cc.getCompany() != null ? cc.getCompany().getName() : "Company";
+            List<Long> companyAdminIds = notificationEventService.getCompanyAdminUserIds(companyId);
+
+            if (dueDate.equals(today)) {
+                // DUE TODAY
+                log.info("Sending DUE TODAY reminder for compliance '{}' (ID: {}) to company '{}'", complianceTitle, cc.getId(), companyName);
+                if (!companyAdminIds.isEmpty()) {
+                    notificationEventService.notifyUsersPushOnly(
+                            companyAdminIds,
+                            "Compliance Due TODAY",
+                            "Company compliance \"" + complianceTitle + "\" is DUE TODAY (" + today + "). Please complete and submit.",
+                            NotificationType.COMPLIANCE_DUE_SOON,
+                            "compliance_details"
+                    );
+                }
+                notificationEventService.notifySuperAdminsPushOnly(
+                        "Company Compliance Due TODAY",
+                        "Company " + companyName + " compliance \"" + complianceTitle + "\" is DUE TODAY (" + today + ").",
+                        NotificationType.COMPLIANCE_DUE_SOON,
+                        "compliance_details"
+                );
+            } else if (dueDate.isBefore(today)) {
+                // OVERDUE
+                long daysOverdue = ChronoUnit.DAYS.between(dueDate, today);
+                log.info("Sending OVERDUE reminder for compliance '{}' (ID: {}, {} days overdue) to company '{}'", complianceTitle, cc.getId(), daysOverdue, companyName);
+                if (!companyAdminIds.isEmpty()) {
+                    notificationEventService.notifyUsersPushOnly(
+                            companyAdminIds,
+                            "Compliance OVERDUE",
+                            "Company compliance \"" + complianceTitle + "\" was due on " + dueDate + " and is OVERDUE by " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + "! Immediate action required.",
+                            NotificationType.COMPLIANCE_OVERDUE,
+                            "compliance_details"
+                    );
+                }
+                notificationEventService.notifySuperAdminsPushOnly(
+                        "Company Compliance OVERDUE",
+                        "Company " + companyName + " compliance \"" + complianceTitle + "\" is OVERDUE by " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " (" + dueDate + ").",
+                        NotificationType.COMPLIANCE_OVERDUE,
+                        "compliance_details"
+                );
+            } else if (dueDate.isAfter(today) && !dueDate.isAfter(future)) {
+                // DUE SOON
+                int reminderDays = config.getReminderDaysBefore() != null ? config.getReminderDaysBefore() : 10;
+                long daysRemaining = ChronoUnit.DAYS.between(today, dueDate);
+                boolean shouldSend = (daysRemaining <= reminderDays);
+
+                if (shouldSend) {
+                    log.info("Sending DUE SOON reminder for compliance '{}' (ID: {}, due in {} days) to company '{}'", complianceTitle, cc.getId(), daysRemaining, companyName);
+                    if (!companyAdminIds.isEmpty()) {
+                        notificationEventService.notifyUsersPushOnly(
+                                companyAdminIds,
+                                "Compliance Due Soon",
+                                "Company compliance \"" + complianceTitle + "\" is due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
+                                NotificationType.COMPLIANCE_DUE_SOON,
+                                "compliance_details"
+                        );
+                    }
+                    notificationEventService.notifySuperAdminsPushOnly(
                             "Compliance Due Soon",
-                            "Company compliance \"" + complianceTitle + "\" is due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
+                            "Company " + companyName + " compliance \"" + complianceTitle + "\" is due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
                             NotificationType.COMPLIANCE_DUE_SOON,
                             "compliance_details"
                     );
@@ -325,7 +572,7 @@ public class SchedulerService {
             }
         }
 
-        log.info("Due reminders processed successfully.");
+        log.info("Due and overdue reminders processed successfully.");
     }
 
     // ─── 4. OVERDUE COMPANY COMPLIANCES (Email & Push to SuperAdmin & Company Admin) ──────────────
@@ -381,7 +628,7 @@ public class SchedulerService {
             }
 
             // Push to SuperAdmins
-            notificationEventService.notifySuperAdminsWithSave(
+            notificationEventService.notifySuperAdminsPushOnly(
                     "Company Compliance Overdue",
                     "Company " + companyName + " has overdue compliance \"" + complianceTitle + "\".",
                     NotificationType.COMPLIANCE_OVERDUE,

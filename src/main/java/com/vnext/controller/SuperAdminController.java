@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/super-admin")
@@ -36,6 +37,13 @@ public class SuperAdminController {
     private final CompanyRepository companyRepository;
     private final ComplianceSubTemplateRepository subTemplateRepository;
     private final ComplianceConfigRepository configRepository;
+    private final NotificationScheduleConfigRepository notificationScheduleConfigRepository;
+    private final DeviceTokenRepository deviceTokenRepository;
+    private final PushDeliveryLogRepository pushDeliveryLogRepository;
+    private final com.vnext.service.PushNotificationService pushNotificationService;
+    private final com.vnext.service.SchedulerService schedulerService;
+    private final UserRepository userRepository;
+    private final com.vnext.security.JwtService jwtService;
 
     // ==================== COMPANY MANAGEMENT ====================
 
@@ -583,5 +591,490 @@ public class SuperAdminController {
         result.put("compliances", complianceList);
 
         return ApiResponse.success(result, "Debug info retrieved");
+    }
+
+    // ==================== FCM PUSH NOTIFICATION SCHEDULE CONFIG ====================
+    // Controls the frequency of physical phone drawer FCM pushes (NOT in-app announcements).
+
+    private String resolveScheduleKey(String notificationType) {
+        if (notificationType == null) return "DUE_REMINDER";
+        String upper = notificationType.trim().toUpperCase();
+        if ("FCM_DUE_REMINDER".equals(upper) || "COMPLIANCE_DUE_SOON".equals(upper) || "DUE_REMINDER".equals(upper)) {
+            return "DUE_REMINDER";
+        }
+        return upper;
+    }
+
+    @GetMapping("/notification-schedule")
+    public ApiResponse<List<NotificationScheduleConfigDTO>> getAllNotificationSchedules() {
+        List<NotificationScheduleConfig> configs = notificationScheduleConfigRepository.findAll();
+        if (configs.isEmpty()) {
+            NotificationScheduleConfig seed = new NotificationScheduleConfig();
+            seed.setNotificationType("DUE_REMINDER");
+            seed.setEnabled(true);
+            seed.setTimesPerDay(3);
+            seed.setStartHour(8);
+            seed.setEndHour(20);
+            seed.setSentTodayCount(0);
+            configs = List.of(notificationScheduleConfigRepository.save(seed));
+        }
+        List<NotificationScheduleConfigDTO> dtos = configs.stream().map(this::mapToScheduleDTO).collect(Collectors.toList());
+        return ApiResponse.success(dtos, "FCM push notification schedules retrieved successfully");
+    }
+
+    @GetMapping("/notification-schedule/{notificationType}")
+    public ApiResponse<NotificationScheduleConfigDTO> getNotificationSchedule(@PathVariable String notificationType) {
+        String key = resolveScheduleKey(notificationType);
+        NotificationScheduleConfig config = notificationScheduleConfigRepository.findByNotificationType(key)
+                .orElseGet(() -> {
+                    if ("DUE_REMINDER".equalsIgnoreCase(key)) {
+                        NotificationScheduleConfig seed = new NotificationScheduleConfig();
+                        seed.setNotificationType("DUE_REMINDER");
+                        seed.setEnabled(true);
+                        seed.setTimesPerDay(3);
+                        seed.setStartHour(8);
+                        seed.setEndHour(20);
+                        seed.setSentTodayCount(0);
+                        return notificationScheduleConfigRepository.save(seed);
+                    }
+                    throw new ResourceNotFoundException("Notification schedule config not found for type: " + notificationType);
+                });
+        return ApiResponse.success(mapToScheduleDTO(config), "FCM push notification schedule retrieved successfully");
+    }
+
+    @PutMapping("/notification-schedule/{notificationType}")
+    public ApiResponse<NotificationScheduleConfigDTO> updateNotificationSchedule(
+            @PathVariable String notificationType,
+            @RequestBody NotificationScheduleConfigDTO dto,
+            @CurrentUser User admin) {
+
+        String key = resolveScheduleKey(notificationType);
+
+        if (dto.getTimesPerDay() != null && (dto.getTimesPerDay() < 1 || dto.getTimesPerDay() > 20)) {
+            throw new BusinessException("timesPerDay must be between 1 and 20");
+        }
+        if (dto.getStartHour() != null && (dto.getStartHour() < 0 || dto.getStartHour() > 23)) {
+            throw new BusinessException("startHour must be between 0 and 23");
+        }
+        if (dto.getEndHour() != null && (dto.getEndHour() < 0 || dto.getEndHour() > 23)) {
+            throw new BusinessException("endHour must be between 0 and 23");
+        }
+        if (dto.getStartHour() != null && dto.getEndHour() != null && dto.getStartHour() >= dto.getEndHour()) {
+            throw new BusinessException("startHour must be strictly less than endHour");
+        }
+
+        NotificationScheduleConfig config = notificationScheduleConfigRepository.findByNotificationType(key)
+                .orElseGet(() -> {
+                    NotificationScheduleConfig seed = new NotificationScheduleConfig();
+                    seed.setNotificationType(key);
+                    return seed;
+                });
+
+        if (dto.getEnabled() != null) {
+            config.setEnabled(dto.getEnabled());
+        }
+        if (dto.getTimesPerDay() != null) {
+            config.setTimesPerDay(Math.max(1, Math.min(20, dto.getTimesPerDay())));
+        }
+        if (dto.getStartHour() != null) {
+            config.setStartHour(dto.getStartHour());
+        }
+        if (dto.getEndHour() != null) {
+            config.setEndHour(dto.getEndHour());
+        }
+        if (admin != null) {
+            config.setUpdatedBy(admin.getId());
+        }
+
+        // Always reset sent counts whenever schedule is saved so new timings apply cleanly
+        config.setSentTodayCount(0);
+        config.setLastSentAt(null);
+        config.setLastSentDate(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
+
+        NotificationScheduleConfig saved = notificationScheduleConfigRepository.save(config);
+        log.info("SuperAdmin {} updated FCM push schedule config for {}: enabled={}, timesPerDay={}, startHour={}, endHour={}",
+                admin != null ? admin.getId() : "SYSTEM", key, saved.getEnabled(), saved.getTimesPerDay(), saved.getStartHour(), saved.getEndHour());
+
+        return ApiResponse.success(mapToScheduleDTO(saved), "FCM push notification schedule updated successfully");
+    }
+
+    @PostMapping("/notification-schedule/trigger-reminders-now")
+    public ApiResponse<String> triggerDueRemindersNow() {
+        log.info("SuperAdmin manually triggered immediate due/overdue compliance reminder checks");
+        schedulerService.executeDueReminderChecks();
+        return ApiResponse.success("Due and overdue compliance reminders evaluated and dispatched to all target devices successfully!");
+    }
+
+    @GetMapping("/notification-schedule/metrics")
+    public ApiResponse<PushNotificationDashboardDTO> getNotificationScheduleMetrics() {
+        java.time.ZoneId istZone = java.time.ZoneId.of("Asia/Kolkata");
+        java.time.LocalDateTime nowIst = java.time.LocalDateTime.now(istZone);
+        java.time.LocalDate todayIst = nowIst.toLocalDate();
+        java.time.LocalDateTime startOfToday = todayIst.atStartOfDay();
+        java.time.LocalDateTime sevenDaysAgo = nowIst.minusDays(7);
+
+        // 1. Config & Slots
+        NotificationScheduleConfig config = notificationScheduleConfigRepository.findByNotificationType("DUE_REMINDER")
+                .orElseGet(() -> {
+                    NotificationScheduleConfig seed = new NotificationScheduleConfig();
+                    seed.setNotificationType("DUE_REMINDER");
+                    seed.setEnabled(true);
+                    seed.setTimesPerDay(3);
+                    seed.setStartHour(8);
+                    seed.setEndHour(20);
+                    seed.setSentTodayCount(0);
+                    return notificationScheduleConfigRepository.save(seed);
+                });
+
+        int timesPerDay = config.getTimesPerDay() != null ? Math.max(1, Math.min(20, config.getTimesPerDay())) : 3;
+        int startHour = config.getStartHour() != null ? config.getStartHour() : 8;
+        int endHour = config.getEndHour() != null ? config.getEndHour() : 20;
+
+        java.time.LocalDateTime dayStart = todayIst.atTime(startHour, 0);
+
+        int sentTodayCount = config.getSentTodayCount() != null ? config.getSentTodayCount() : 0;
+        if (!todayIst.equals(config.getLastSentDate()) || (config.getLastSentAt() != null && config.getLastSentAt().isBefore(dayStart))) {
+            sentTodayCount = 0;
+        }
+        if (sentTodayCount > timesPerDay) {
+            sentTodayCount = 0;
+        }
+
+        double intervalMinsDouble = timesPerDay <= 1 ? 0 : ((endHour - startHour) * 60.0) / (timesPerDay - 1);
+        int intervalMins = (int) Math.round(intervalMinsDouble);
+        String intervalFormatted = timesPerDay <= 1 ? "Once daily" : "Every " + (intervalMins >= 60 ? (intervalMins / 60) + "h " + (intervalMins % 60 > 0 ? (intervalMins % 60) + "m" : "") : intervalMins + "m");
+
+        List<PushNotificationDashboardDTO.DailySlotDTO> dailySlots = new ArrayList<>();
+        java.time.LocalDateTime nextSlotTime = null;
+
+        java.time.format.DateTimeFormatter slotTimeFmt = java.time.format.DateTimeFormatter.ofPattern("hh:mm a");
+
+        for (int i = 0; i < timesPerDay; i++) {
+            java.time.LocalDateTime slotTime = dayStart.plusMinutes(Math.round(intervalMinsDouble * i));
+            String timeFormatted = slotTime.format(slotTimeFmt);
+            String status;
+            boolean isNext = false;
+
+            boolean alreadySent = i < sentTodayCount;
+            boolean timeHasPassed = slotTime.isBefore(nowIst.minusSeconds(30));
+
+            if (alreadySent) {
+                // Scheduler actually fired and sent this slot
+                status = "SENT";
+            } else if (timeHasPassed) {
+                // Slot time passed but scheduler did NOT send it (e.g. server was down, or scheduler wasn't running)
+                status = "MISSED";
+            } else if (nextSlotTime == null) {
+                // Earliest upcoming slot at or after current time
+                nextSlotTime = slotTime;
+                isNext = true;
+                status = "NEXT";
+            } else {
+                status = "PENDING";
+            }
+
+            dailySlots.add(PushNotificationDashboardDTO.DailySlotDTO.builder()
+                    .slotNumber(i + 1)
+                    .timeFormatted(timeFormatted)
+                    .status(status)
+                    .isNext(isNext)
+                    .build());
+        }
+
+        String nextRunTimeStr = null;
+        String nextRunFormatted = null;
+        String timeRemaining = null;
+
+        if (!Boolean.TRUE.equals(config.getEnabled())) {
+            nextRunFormatted = "Schedule Paused";
+            timeRemaining = "Disabled";
+        } else if (nextSlotTime != null) {
+            nextRunTimeStr = nextSlotTime.toString();
+            nextRunFormatted = "Today at " + nextSlotTime.format(slotTimeFmt);
+            long totalMins = java.time.Duration.between(nowIst, nextSlotTime).toMinutes();
+            if (totalMins > 0) {
+                long h = totalMins / 60;
+                long m = totalMins % 60;
+                timeRemaining = "in " + (h > 0 ? h + "h " : "") + m + "m remaining";
+            } else {
+                timeRemaining = "Due now";
+            }
+        } else {
+            java.time.LocalDateTime tomorrowFirstSlot = todayIst.plusDays(1).atTime(startHour, 0);
+            nextRunTimeStr = tomorrowFirstSlot.toString();
+            long totalMins = java.time.Duration.between(nowIst, tomorrowFirstSlot).toMinutes();
+            long h = totalMins / 60;
+            long m = totalMins % 60;
+            nextRunFormatted = "Tomorrow at " + tomorrowFirstSlot.format(slotTimeFmt);
+            timeRemaining = "in " + (h > 0 ? h + "h " : "") + m + "m remaining";
+        }
+
+        // 2. Metrics (Today & Week)
+        long todayPushes = pushDeliveryLogRepository.countSince(startOfToday);
+        long todaySuccess = pushDeliveryLogRepository.sumSuccessCountSince(startOfToday);
+        long todayFailure = pushDeliveryLogRepository.sumFailureCountSince(startOfToday);
+        long todayRecipients = pushDeliveryLogRepository.sumRecipientCountSince(startOfToday);
+        double todayRate = (todaySuccess + todayFailure) > 0 ? Math.round(((double) todaySuccess / (todaySuccess + todayFailure)) * 1000.0) / 10.0 : 100.0;
+
+        long weekPushes = pushDeliveryLogRepository.countSince(sevenDaysAgo);
+        long weekSuccess = pushDeliveryLogRepository.sumSuccessCountSince(sevenDaysAgo);
+        long weekFailure = pushDeliveryLogRepository.sumFailureCountSince(sevenDaysAgo);
+        long weekRecipients = pushDeliveryLogRepository.sumRecipientCountSince(sevenDaysAgo);
+        double weekRate = (weekSuccess + weekFailure) > 0 ? Math.round(((double) weekSuccess / (weekSuccess + weekFailure)) * 1000.0) / 10.0 : 100.0;
+
+        long totalSuccess = pushDeliveryLogRepository.sumTotalSuccessCount();
+        long totalFailure = pushDeliveryLogRepository.sumTotalFailureCount();
+
+        // 3. Devices
+        long totalDevices = deviceTokenRepository.count();
+        long androidCount = deviceTokenRepository.countByPlatform(com.vnext.entity.Platform.ANDROID);
+        long iosCount = deviceTokenRepository.countByPlatform(com.vnext.entity.Platform.IOS);
+        long activeUsers = deviceTokenRepository.countDistinctUsers();
+
+        // 4. Recent Logs
+        java.time.format.DateTimeFormatter logDtFmt = java.time.format.DateTimeFormatter.ofPattern("dd MMM, hh:mm a");
+        List<PushNotificationDashboardDTO.PushDeliveryLogDTO> recentLogs = pushDeliveryLogRepository
+                .findAllByOrderByCreatedAtDesc(PageRequest.of(0, 20))
+                .stream()
+                .map(l -> {
+                    String timeAgo = formatTimeAgo(l.getCreatedAt(), nowIst);
+                    String sentAtFormatted = l.getCreatedAt() != null ? l.getCreatedAt().format(logDtFmt) : "-";
+                    return PushNotificationDashboardDTO.PushDeliveryLogDTO.builder()
+                            .id(l.getId())
+                            .traceId(l.getTraceId())
+                            .notificationType(l.getNotificationType())
+                            .title(l.getTitle())
+                            .body(l.getBody())
+                            .recipientCount(l.getRecipientCount())
+                            .successCount(l.getSuccessCount())
+                            .failureCount(l.getFailureCount())
+                            .status(l.getStatus())
+                            .errorMessage(l.getErrorMessage())
+                            .sentAtFormatted(sentAtFormatted)
+                            .timeAgo(timeAgo)
+                            .build();
+                })
+                .collect(Collectors.toList());
+
+        PushNotificationDashboardDTO dto = PushNotificationDashboardDTO.builder()
+                .schedule(mapToScheduleDTO(config))
+                .nextRunTime(nextRunTimeStr)
+                .nextRunFormatted(nextRunFormatted)
+                .timeRemaining(timeRemaining)
+                .intervalMinutes(intervalMins)
+                .intervalFormatted(intervalFormatted)
+                .dailySlots(dailySlots)
+                .todayPushesCount(todayPushes)
+                .todaySuccessCount(todaySuccess)
+                .todayFailureCount(todayFailure)
+                .todayRecipientsCount(todayRecipients)
+                .todaySuccessRate(todayRate)
+                .weekPushesCount(weekPushes)
+                .weekSuccessCount(weekSuccess)
+                .weekFailureCount(weekFailure)
+                .weekRecipientsCount(weekRecipients)
+                .weekSuccessRate(weekRate)
+                .totalPushesCount(todayPushes + weekPushes)
+                .totalSuccessCount(totalSuccess)
+                .totalFailureCount(totalFailure)
+                .totalRegisteredDevices(totalDevices)
+                .androidDevicesCount(androidCount)
+                .iosDevicesCount(iosCount)
+                .activeUsersWithDevices(activeUsers)
+                .recentLogs(recentLogs)
+                .build();
+
+        return ApiResponse.success(dto, "FCM push dashboard metrics retrieved successfully");
+    }
+
+    @PostMapping("/notification-schedule/test-push")
+    public ApiResponse<String> sendTestPush(
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) String body,
+            @CurrentUser User admin) {
+
+        java.time.ZoneId istZone = java.time.ZoneId.of("Asia/Kolkata");
+        String pushTitle = (title != null && !title.isBlank()) ? title : "FCM Push Delivery Test";
+        String pushBody = (body != null && !body.isBlank()) ? body : "Test push notification dispatched directly from SuperAdmin dashboard at " +
+                java.time.LocalDateTime.now(istZone).format(java.time.format.DateTimeFormatter.ofPattern("hh:mm:ss a"));
+
+        com.vnext.service.NotificationPayload payload = com.vnext.service.NotificationPayload.builder()
+                .title(pushTitle)
+                .body(pushBody)
+                .type(NotificationType.SYSTEM_ANNOUNCEMENT)
+                .screen("notifications")
+                .build();
+
+        if (admin != null) {
+            pushNotificationService.sendToUser(admin.getId(), payload);
+        } else {
+            List<Long> adminIds = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN)
+                    .stream().map(User::getId).collect(Collectors.toList());
+            pushNotificationService.sendToUsers(adminIds, payload);
+        }
+
+        return ApiResponse.success("Test FCM push notification dispatched to registered devices successfully!");
+    }
+
+    // ==================== DEVICE FLEET & FORCE LOGOUT ====================
+
+    @GetMapping("/devices")
+    @Transactional(readOnly = true)
+    public ApiResponse<List<RegisteredDeviceDTO>> getRegisteredDevices() {
+        java.time.ZoneId istZone = java.time.ZoneId.of("Asia/Kolkata");
+        java.time.LocalDateTime nowIst = java.time.LocalDateTime.now(istZone);
+        java.time.format.DateTimeFormatter dtFmt = java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a");
+
+        List<DeviceToken> tokens = deviceTokenRepository.findAll();
+        Set<Long> userIds = tokens.stream().map(DeviceToken::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, User> userMap = userRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
+
+        List<RegisteredDeviceDTO> dtos = tokens.stream().map(t -> {
+            User user = userMap.get(t.getUserId());
+            String token = t.getDeviceToken() != null ? t.getDeviceToken() : "";
+            String masked = token.length() > 14
+                    ? token.substring(0, 6) + "..." + token.substring(token.length() - 6)
+                    : token;
+
+            String lastSeenFmt = "-";
+            if (t.getLastSeen() != null) {
+                lastSeenFmt = t.getLastSeen().format(dtFmt) + " (" + formatTimeAgo(t.getLastSeen(), nowIst) + ")";
+            }
+
+            String companyName = "VNext SuperAdmin";
+            if (user != null) {
+                if (user.getRole() == UserRole.SUPER_ADMIN) {
+                    companyName = "VNext SuperAdmin";
+                } else {
+                    try {
+                        if (user.getCompany() != null && user.getCompany().getId() != null) {
+                            Long cid = user.getCompany().getId();
+                            companyName = companyRepository.findById(cid).map(Company::getName).orElse("VNext LLP");
+                        }
+                    } catch (Exception e) {
+                        companyName = "VNext LLP";
+                    }
+                }
+            }
+
+            return RegisteredDeviceDTO.builder()
+                    .id(t.getId())
+                    .userId(t.getUserId())
+                    .userName(user != null ? (user.getFirstName() + " " + (user.getLastName() != null ? user.getLastName() : "")).trim() : "Unknown User")
+                    .userEmail(user != null ? user.getEmail() : "-")
+                    .userRole(user != null && user.getRole() != null ? user.getRole().name() : "-")
+                    .companyName(companyName)
+                    .platform(t.getPlatform() != null ? t.getPlatform().name() : "ANDROID")
+                    .deviceName(t.getDeviceName() != null ? t.getDeviceName() : "Mobile Device")
+                    .appVersion(t.getAppVersion() != null ? t.getAppVersion() : "1.0.0")
+                    .lastSeen(t.getLastSeen() != null ? t.getLastSeen().toString() : null)
+                    .lastSeenFormatted(lastSeenFmt)
+                    .tokenMasked(masked)
+                    .build();
+        }).sorted((a, b) -> {
+            if (a.getLastSeen() == null && b.getLastSeen() == null) return 0;
+            if (a.getLastSeen() == null) return 1;
+            if (b.getLastSeen() == null) return -1;
+            return b.getLastSeen().compareTo(a.getLastSeen());
+        }).collect(Collectors.toList());
+
+        return ApiResponse.success(dtos, "Registered devices retrieved successfully");
+    }
+
+    @DeleteMapping("/devices/{id}")
+    public ApiResponse<String> revokeDevice(@PathVariable Long id) {
+        DeviceToken dt = deviceTokenRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Device token not found with id: " + id));
+
+        if (dt.getDeviceToken() != null && !dt.getDeviceToken().startsWith("SIMULATOR_") && !dt.getDeviceToken().startsWith("MOCK_")) {
+            com.vnext.service.NotificationPayload payload = com.vnext.service.NotificationPayload.builder()
+                    .title("Session Revoked")
+                    .body("Your device token has been revoked by Administrator.")
+                    .type(NotificationType.SYSTEM_ANNOUNCEMENT)
+                    .screen("login")
+                    .extra(Map.of("action", "FORCE_LOGOUT", "logout", "true"))
+                    .build();
+            pushNotificationService.sendToToken(dt.getDeviceToken(), payload);
+        }
+
+        deviceTokenRepository.delete(dt);
+        log.info("SuperAdmin revoked device token ID: {} for user ID: {}", id, dt.getUserId());
+        return ApiResponse.success("Device token revoked successfully");
+    }
+
+    @PostMapping("/devices/logout-all")
+    public ApiResponse<Map<String, Object>> logoutAllDevices(jakarta.servlet.http.HttpServletRequest request) {
+        // 1. Invalidate ALL existing JWT tokens globally
+        jwtService.revokeAllTokens();
+        log.warn("SYSTEM-WIDE LOGOUT: Global JWT revocation timestamp updated. All active mobile & web tokens are now invalidated.");
+
+        // 2. Multicast FCM Force Logout push to all registered devices
+        List<DeviceToken> allTokens = deviceTokenRepository.findAll();
+        int totalDevices = allTokens.size();
+
+        List<String> realTokens = allTokens.stream()
+                .map(DeviceToken::getDeviceToken)
+                .filter(t -> t != null && !t.isBlank() && !t.startsWith("MOCK_"))
+                .distinct()
+                .collect(Collectors.toList());
+
+        if (!realTokens.isEmpty()) {
+            com.vnext.service.NotificationPayload payload = com.vnext.service.NotificationPayload.builder()
+                    .title("Session Terminated")
+                    .body("A system-wide logout was executed by Super Admin. All sessions have ended.")
+                    .type(NotificationType.SYSTEM_ANNOUNCEMENT)
+                    .screen("login")
+                    .extra(Map.of("action", "FORCE_LOGOUT", "logout", "true"))
+                    .build();
+
+            pushNotificationService.sendMulticast(realTokens, payload);
+            log.info("Dispatched system-wide force logout push to {} device tokens", realTokens.size());
+        }
+
+        // 3. Purge all device tokens from database
+        deviceTokenRepository.deleteAll();
+        log.warn("SYSTEM-WIDE LOGOUT: Purged all {} device tokens from database.", totalDevices);
+
+        // 4. Invalidate SuperAdmin web session immediately
+        if (request != null && request.getSession(false) != null) {
+            request.getSession(false).invalidate();
+        }
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+
+        return ApiResponse.success(
+                Map.of("revokedCount", totalDevices, "multicastCount", realTokens.size()),
+                "System-wide logout completed successfully! All " + totalDevices + " device tokens have been revoked and all sessions logged out."
+        );
+    }
+
+    private String formatTimeAgo(java.time.LocalDateTime dt, java.time.LocalDateTime now) {
+        if (dt == null) return "Just now";
+        long seconds = java.time.Duration.between(dt, now).getSeconds();
+        if (seconds < 60) return seconds + "s ago";
+        if (seconds < 3600) return (seconds / 60) + "m ago";
+        if (seconds < 86400) return (seconds / 3600) + "h ago";
+        return (seconds / 86400) + "d ago";
+    }
+
+    private NotificationScheduleConfigDTO mapToScheduleDTO(NotificationScheduleConfig entity) {
+        java.time.ZoneId istZone = java.time.ZoneId.of("Asia/Kolkata");
+        java.time.LocalDate today = java.time.LocalDate.now(istZone);
+        java.time.LocalDateTime dayStart = today.atTime(entity.getStartHour() != null ? entity.getStartHour() : 8, 0);
+
+        int sentCount = entity.getSentTodayCount() != null ? entity.getSentTodayCount() : 0;
+        if (!today.equals(entity.getLastSentDate()) || (entity.getLastSentAt() != null && entity.getLastSentAt().isBefore(dayStart))) {
+            sentCount = 0;
+        }
+
+        NotificationScheduleConfigDTO dto = new NotificationScheduleConfigDTO();
+        dto.setNotificationType(entity.getNotificationType());
+        dto.setEnabled(entity.getEnabled());
+        dto.setTimesPerDay(entity.getTimesPerDay());
+        dto.setStartHour(entity.getStartHour());
+        dto.setEndHour(entity.getEndHour());
+        dto.setLastSentAt(entity.getLastSentAt() != null ? entity.getLastSentAt().toString() : null);
+        dto.setSentTodayCount(sentCount);
+        return dto;
     }
 }

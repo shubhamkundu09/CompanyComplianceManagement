@@ -1144,9 +1144,9 @@
             <i class="fas fa-tags"></i> Categories
         </a>
 
-        <div class="sidebar-label">Communication</div>
+        <div class="sidebar-label">Push Settings</div>
         <a href="${baseUrl}/super-admin/notifications" class="nav-item">
-            <i class="fas fa-bell"></i> Notifications
+            <i class="fas fa-mobile-alt"></i> FCM Push Settings
         </a>
 
         <div class="sidebar-label">Account</div>
@@ -1173,24 +1173,25 @@
 
             <!-- Notifications -->
             <div style="position:relative;">
-                <button class="header-btn" onclick="toggleNotifications()" title="Notifications">
+                <button class="header-btn" onclick="toggleNotifications()" title="FCM Push Alerts">
                     <i class="fas fa-bell"></i>
                     <span class="badge-count" id="notifBadge">0</span>
                 </button>
 
                 <div class="notification-dropdown" id="notificationDropdown">
                     <div class="notification-header">
-                        <h4><i class="fas fa-bell" style="color:var(--primary);margin-right:8px;"></i> Notifications</h4>
+                        <h4><i class="fas fa-mobile-alt" style="color:var(--primary);margin-right:8px;"></i> FCM Push Alerts</h4>
                         <span class="mark-all" onclick="markAllRead()">Mark all as read</span>
                     </div>
                     <div id="notificationList">
                         <div class="notification-empty">
-                            <i class="fas fa-spinner fa-spin"></i>
-                            <div style="margin-top:8px;">Loading...</div>
+                            <i class="fas fa-check-circle" style="color:var(--success);"></i>
+                            <div style="margin-top:6px;font-weight:600;">Push Notifications Active</div>
+                            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">Dispatched to device drawers</div>
                         </div>
                     </div>
                     <div class="notification-footer">
-                        <a href="${baseUrl}/super-admin/notifications">View all notifications</a>
+                        <a href="${baseUrl}/super-admin/notifications">FCM Push Settings & Logs</a>
                     </div>
                 </div>
             </div>
@@ -1287,6 +1288,20 @@
         </div>
 
     </main>
+</div>
+
+<!-- ==================== DELETION LOADING OVERLAY ==================== -->
+<div id="deletionOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.7);backdrop-filter:blur(5px);z-index:99999;flex-direction:column;align-items:center;justify-content:center;">
+    <div style="background:var(--card-bg, #ffffff);padding:36px 40px;border-radius:18px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.35);display:flex;flex-direction:column;align-items:center;gap:18px;max-width:420px;text-align:center;border:1px solid rgba(226,232,240,0.8);">
+        <div class="spinner" style="width:52px;height:52px;border-width:4px;border-top-color:var(--danger, #ef4444);"></div>
+        <div>
+            <div style="font-weight:700;font-size:18px;color:var(--gray-900, #0f172a);" id="deletionOverlayTitle">Permanently Deleting Company…</div>
+            <div style="font-size:13px;color:var(--gray-600, #64748b);margin-top:8px;line-height:1.5;" id="deletionOverlaySubtitle">Removing child records, employees, compliance templates, assignments, and documents. Please wait…</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--danger, #ef4444);font-weight:600;background:rgba(239,68,68,0.08);padding:6px 14px;border-radius:20px;">
+            <i class="fas fa-exclamation-triangle"></i> Do not close or refresh this page
+        </div>
+    </div>
 </div>
 
 <!-- ==================== ADD COMPANY MODAL ==================== -->
@@ -1646,40 +1661,45 @@
 
     async function loadNotifications() {
         try {
-            var data = await api('/api/notifications/active');
+            var res = await api('/api/super-admin/notification-schedule/metrics');
             var list = document.getElementById('notificationList');
+            var badge = document.getElementById('notifBadge');
             if (!list) return;
 
-            if (data && data.success && data.data && data.data.length > 0) {
-                var html = '';
-                for (var i = 0; i < data.data.length; i++) {
-                    var n = data.data[i];
-                    var dotClass = 'general';
-                    if (n.notificationType === 'URGENT') dotClass = 'urgent';
-                    else if (n.notificationType === 'IMPORTANT') dotClass = 'important';
+            if (res && res.success && res.data) {
+                var logs = res.data.recentLogs || [];
+                if (badge) {
+                    badge.textContent = res.data.todayPushesCount !== undefined ? res.data.todayPushesCount : logs.length;
+                }
 
-                    html += '<div class="notification-item">' +
-                        '<div class="notif-title">' +
-                        '<span class="notif-dot ' + dotClass + '"></span>' +
-                        escapeHtml(n.title) +
-                        '</div>' +
-                        '<div class="notif-message">' + escapeHtml(n.message) + '</div>' +
-                        '<div class="notif-time"><i class="far fa-clock"></i> ' + formatTimeAgo(n.createdAt) + '</div>' +
+                if (logs.length > 0) {
+                    var html = '';
+                    for (var i = 0; i < Math.min(logs.length, 5); i++) {
+                        var log = logs[i];
+                        var statusTag = (log.failureCount && log.failureCount > 0)
+                            ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.1);color:#ef4444;font-weight:600;">' + (log.successCount || 0) + ' sent, ' + log.failureCount + ' failed</span>'
+                            : '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(16,185,129,0.1);color:#10b981;font-weight:600;">' + (log.successCount || log.recipientCount || 0) + ' delivered</span>';
+
+                        html += '<div class="notification-item" style="padding:10px 14px;border-bottom:1px solid rgba(226,232,240,0.6);">' +
+                            '<div class="notif-title" style="display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;color:var(--gray-800);">' +
+                            '<span><i class="fas fa-paper-plane" style="color:var(--primary);margin-right:6px;font-size:11px;"></i>' + escapeHtml(log.title || 'Push Alert') + '</span>' +
+                            statusTag +
+                            '</div>' +
+                            '<div class="notif-message" style="font-size:12px;color:var(--gray-500);margin-top:3px;line-height:1.4;">' + escapeHtml(log.body || '') + '</div>' +
+                            '<div class="notif-time" style="font-size:11px;color:var(--gray-400);margin-top:4px;"><i class="far fa-clock"></i> ' + (log.timeAgo || 'Recently') + ' &bull; ' + (log.recipientCount || 0) + ' targets</div>' +
+                            '</div>';
+                    }
+                    list.innerHTML = html;
+                } else {
+                    list.innerHTML = '<div class="notification-empty" style="text-align:center;padding:24px 16px;">' +
+                        '<i class="fas fa-check-circle" style="color:var(--success);font-size:24px;"></i>' +
+                        '<div style="margin-top:8px;font-weight:600;color:var(--gray-700);">FCM Push Active</div>' +
+                        '<div style="font-size:11px;color:var(--gray-400);margin-top:2px;">Next: ' + (res.data.nextRunFormatted || 'Scheduled') + '</div>' +
                         '</div>';
                 }
-                list.innerHTML = html;
-                document.getElementById('notifBadge').textContent = data.data.length;
-
-            } else {
-                list.innerHTML = '<div class="notification-empty">' +
-                    '<i class="fas fa-bell-slash"></i>' +
-                    '<div>No notifications</div>' +
-                    '</div>';
-                document.getElementById('notifBadge').textContent = '0';
-                document.getElementById('notifCount').textContent = '0';
             }
         } catch(e) {
-            console.log('Notification error:', e);
+            console.log('FCM Notification error:', e);
         }
     }
 
@@ -1857,14 +1877,27 @@
     }
 
     async function deleteCompany(id, name) {
-        if (!confirm('Delete "' + name + '"? This cannot be undone.')) return;
+        if (!confirm('Permanently delete "' + name + '"?\n\n⚠️ WARNING: This will permanently delete the company along with all its employees, company admins, compliance records, assignments, and documents.\n\nThis action CANNOT be undone. Are you sure you want to proceed?')) return;
 
-        var data = await api('/api/super-admin/companies/' + id, { method: 'DELETE' });
-        if (data && data.success) {
-            toast('Company deleted', 'success');
-            loadCompanies();
-        } else {
-            toast((data && data.error) || 'Failed to delete', 'error');
+        var overlay = document.getElementById('deletionOverlay');
+        var overlayTitle = document.getElementById('deletionOverlayTitle');
+        if (overlayTitle) overlayTitle.textContent = 'Deleting "' + name + '"…';
+        if (overlay) overlay.style.display = 'flex';
+
+        try {
+            var data = await api('/api/super-admin/companies/' + id, { method: 'DELETE' });
+            if (data && data.success) {
+                toast(data.message || ('Company "' + name + '" has been permanently deleted'), 'success', 4000);
+                loadCompanies();
+                loadStats();
+            } else {
+                var errMsg = (data && (data.message || data.error)) || 'Failed to permanently delete company';
+                toast(errMsg, 'error', 5000);
+            }
+        } catch (e) {
+            toast('Error deleting company: ' + (e.message || e), 'error', 5000);
+        } finally {
+            if (overlay) overlay.style.display = 'none';
         }
     }
 

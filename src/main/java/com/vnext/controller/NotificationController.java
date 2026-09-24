@@ -1,75 +1,96 @@
 package com.vnext.controller;
 
 import com.vnext.dto.ApiResponse;
-import com.vnext.entity.Notification;
-import com.vnext.entity.NotificationType;
+import com.vnext.dto.PushEventDTO;
 import com.vnext.entity.User;
+import com.vnext.entity.UserPushNotification;
+import com.vnext.repository.UserPushNotificationRepository;
 import com.vnext.security.CurrentUser;
-import com.vnext.service.NotificationEventService;
-import com.vnext.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
+/**
+ * Controller for notification endpoints.
+ * Announcements have been completely removed from the system.
+ * Only FCM Push Notifications and native drawer delivery remain.
+ */
 @RestController
 @RequestMapping("/api/notifications")
 @RequiredArgsConstructor
 public class NotificationController {
 
-    private final NotificationService notificationService;
-    private final NotificationEventService notificationEventService;
+    private final UserPushNotificationRepository userPushNotificationRepository;
 
     @PostMapping("/admin/create")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
-    public ApiResponse<Notification> createNotification(
-            @RequestParam String title,
-            @RequestParam String message,
-            @RequestParam(required = false, defaultValue = "GENERAL") String notificationType,
-            @CurrentUser User admin) {
-
-        // Save the announcement
-        Notification notification = notificationService.createNotification(title, message, notificationType, admin.getId());
-
-        // Send push notification to all admins (SuperAdmin + CompanyAdmin)
-        notificationEventService.notifyAllAdminsPushOnly(
-                title,
-                message,
-                NotificationType.SYSTEM_ANNOUNCEMENT,
-                "notifications"
-        );
-
-        return ApiResponse.success(notification, "Notification created successfully");
+    public ApiResponse<Void> createNotification() {
+        return ApiResponse.error("Announcement functionality has been removed. All notifications are sent directly to physical device notification drawers via FCM push.", 400);
     }
 
-    // Get active announcements only (used by JSP header bell, dropdown, and notifications page)
+    /**
+     * Sync pending push notifications for current user.
+     * Guaranteed delivery into native mobile drawer even if APNs token is unavailable on Free Apple Developer account.
+     */
+    @GetMapping("/sync-pending")
+    public ApiResponse<List<PushEventDTO>> syncPendingPushNotifications(
+            @CurrentUser User currentUser,
+            @RequestParam(name = "afterId", defaultValue = "0") Long afterId) {
+        if (currentUser == null) {
+            return ApiResponse.success(Collections.emptyList(), "Unauthenticated");
+        }
+        List<UserPushNotification> list = userPushNotificationRepository.findPendingForUser(currentUser.getId(), afterId);
+        List<PushEventDTO> dtos = list.stream().map(upn -> {
+            Map<String, String> data = new HashMap<>();
+            if (upn.getNotificationType() != null) data.put("type", upn.getNotificationType());
+            if (upn.getScreen() != null) data.put("screen", upn.getScreen());
+            if (upn.getAction() != null) data.put("action", upn.getAction());
+            if (upn.getTraceId() != null) data.put("traceId", upn.getTraceId());
+
+            return PushEventDTO.builder()
+                    .id(upn.getId())
+                    .userId(upn.getUserId())
+                    .title(upn.getTitle())
+                    .body(upn.getBody())
+                    .type(upn.getNotificationType())
+                    .screen(upn.getScreen())
+                    .action(upn.getAction())
+                    .traceId(upn.getTraceId())
+                    .data(data)
+                    .createdAt(upn.getCreatedAt() != null ? upn.getCreatedAt().toString() : null)
+                    .build();
+        }).collect(Collectors.toList());
+
+        return ApiResponse.success(dtos, "Pending push notifications retrieved");
+    }
+
+    // Returns empty list: in-app announcements have been removed in favor of FCM push notifications
     @GetMapping("/active")
-    public ApiResponse<List<Notification>> getActiveNotifications(@CurrentUser User user) {
-        var role = user != null ? user.getRole() : null;
-        List<Notification> notifications = notificationService.getActiveAnnouncementsForRole(role);
-        return ApiResponse.success(notifications, "Active notifications retrieved");
+    public ApiResponse<List<Object>> getActiveNotifications() {
+        return ApiResponse.success(Collections.emptyList(), "Announcements retired. Push alerts are delivered via FCM.");
     }
 
-    // Get all events for real-time mobile in-app poller
+    // Returns empty list: mobile poller retired in favor of native Firebase Cloud Messaging
     @GetMapping("/poller")
-    public ApiResponse<List<Notification>> getPollerNotifications(@CurrentUser User user) {
-        var role = user != null ? user.getRole() : null;
-        List<Notification> notifications = notificationService.getPollerNotificationsForRole(role);
-        return ApiResponse.success(notifications, "Poller notifications retrieved");
+    public ApiResponse<List<Object>> getPollerNotifications() {
+        return ApiResponse.success(Collections.emptyList(), "Poller retired. Only FCM push is active.");
     }
 
-    // Get active announcement count for header badge
+    // Active announcement count is 0
     @GetMapping("/count")
     public ApiResponse<Long> getActiveNotificationCount() {
-        long count = notificationService.getActiveNotificationCount();
-        return ApiResponse.success(count, "Active notification count retrieved");
+        return ApiResponse.success(0L, "Active notification count");
     }
 
     @DeleteMapping("/admin/{id}")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ApiResponse<Void> deleteNotification(@PathVariable Long id) {
-        notificationService.deleteNotification(id);
         return ApiResponse.success("Notification deleted successfully");
     }
 }

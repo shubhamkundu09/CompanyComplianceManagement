@@ -49,4 +49,7 @@ public interface ComplianceTemplateRepository extends JpaRepository<ComplianceTe
     long countByIsCompanySpecificFalseAndIsActiveTrue();
 
     long countByCompanyIdAndIsCompanySpecificTrueAndIsActiveTrue(Long companyId);
+
+    @Query("SELECT ct FROM ComplianceTemplate ct WHERE ct.company.id = :companyId")
+    List<ComplianceTemplate> findByCompanyId(@Param("companyId") Long companyId);
 }

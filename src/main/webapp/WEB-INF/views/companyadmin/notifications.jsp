@@ -992,12 +992,9 @@
 
         <!-- ==================== EMPTY STATE ==================== -->
         <div id="emptyState" class="empty-state" style="display:none;">
-            <i class="fas fa-bell-slash"></i>
-            <h3>No Notifications</h3>
-            <p>You're all caught up! No new notifications to display.</p>
-            <button onclick="refreshNotifications()" class="btn btn-primary">
-                <i class="fas fa-sync-alt"></i> Check for Updates
-            </button>
+            <i class="fas fa-mobile-alt" style="font-size:42px;color:var(--primary);margin-bottom:12px;"></i>
+            <h3>FCM Push Notifications Active</h3>
+            <p>In-app announcements have been retired. All compliance reminders and status updates are sent directly to your device notification drawer via FCM push.</p>
         </div>
 
     </main>

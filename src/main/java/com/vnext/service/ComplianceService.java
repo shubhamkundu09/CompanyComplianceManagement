@@ -78,7 +78,7 @@ public class ComplianceService {
             log.info("Non-editable compliance template created – will be assigned after sub-compliances are configured by SuperAdmin");
         }
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Created",
                 "Compliance category \"" + saved.getName() + "\" has been created.",
                 NotificationType.COMPLIANCE_CREATED,
@@ -109,7 +109,7 @@ public class ComplianceService {
         ComplianceTemplate saved = templateRepository.save(template);
         log.info("Compliance template updated with ID: {}", saved.getId());
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Updated",
                 "Compliance category \"" + saved.getName() + "\" has been updated.",
                 NotificationType.COMPLIANCE_CONFIG_UPDATED,
@@ -151,7 +151,7 @@ public class ComplianceService {
         addHistoryForTemplate(parentId, "Sub-Compliance Added",
                 "Added sub-compliance: " + saved.getName() + " under parent: " + parent.getName() + " with display order: " + saved.getDisplayOrder(), adminId);
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Sub-Compliance Created",
                 "Sub-compliance \"" + saved.getName() + "\" has been created under \"" + parent.getName() + "\".",
                 NotificationType.SUB_COMPLIANCE_CREATED,
@@ -179,7 +179,7 @@ public class ComplianceService {
         subTemplateRepository.save(subTemplate);
         log.info("Sub-template updated successfully with displayOrder: {}", subTemplate.getDisplayOrder());
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Sub-Compliance Updated",
                 "Sub-compliance \"" + subTemplate.getName() + "\" has been updated.",
                 NotificationType.COMPLIANCE_CONFIG_UPDATED,
@@ -291,7 +291,7 @@ public class ComplianceService {
                 "Company added sub‑compliance: " + saved.getName() + " under editable compliance: " + parent.getName(),
                 userRepository.findById(adminId).orElse(null));
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Company Added Sub‑Compliance",
                 "Company " + company.getName() + " added sub‑compliance \"" + saved.getName() + "\" under \"" + parent.getName() + "\".",
                 NotificationType.SUB_COMPLIANCE_CREATED,
@@ -591,7 +591,7 @@ public class ComplianceService {
         log.info("=== Compliance assigned successfully to company: {} ===", companyId);
 
         // Notifications
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Company Assigned to Compliance",
                 "Company " + company.getName() + " has been assigned to \"" + template.getName() + "\".",
                 NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
@@ -850,7 +850,7 @@ public class ComplianceService {
                 "compliance_details"
         );
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Configured Successfully",
                 "Compliance \"" + template.getName() + "\" details with configurations saved successfully.",
                 NotificationType.COMPLIANCE_CONFIG_UPDATED,
@@ -1026,7 +1026,7 @@ public class ComplianceService {
                 "compliance_details"
         );
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Sub-Compliance Configured Successfully",
                 "Sub-compliance \"" + subTemplate.getName() + "\" under \"" + subTemplate.getParentTemplate().getName() + "\" details with configurations saved successfully.",
                 NotificationType.COMPLIANCE_CONFIG_UPDATED,
@@ -1095,17 +1095,16 @@ public class ComplianceService {
                 (config.getSubTemplate() != null ? config.getSubTemplate().getName() : "Compliance");
 
         if (!companyAdminUserIds.isEmpty()) {
-            notificationEventService.notifyUsersWithSave(
+            notificationEventService.notifyUsersPushOnly(
                     companyAdminUserIds,
                     "Compliance Configuration Updated",
                     "Configuration for \"" + configName + "\" has been updated.",
                     NotificationType.COMPLIANCE_CONFIG_UPDATED,
-                    "compliance_details",
-                    UserRole.COMPANY_ADMIN.name()
+                    "compliance_details"
             );
         }
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Configuration Updated",
                 "Configuration for \"" + configName + "\" details saved successfully.",
                 NotificationType.COMPLIANCE_CONFIG_UPDATED,
@@ -1188,7 +1187,7 @@ public class ComplianceService {
         log.info("Sub-compliance configured with config ID: {}", saved.getId());
 
         if (companyCompliance != null && companyCompliance.getCompany() != null) {
-            notificationEventService.notifySuperAdminsWithSave(
+            notificationEventService.notifySuperAdminsPushOnly(
                     "Sub-Compliance Configured",
                     "Company " + companyCompliance.getCompany().getName() + " configured sub-compliance \"" + subTemplate.getName() + "\".",
                     NotificationType.COMPLIANCE_CONFIG_UPDATED,
@@ -1356,7 +1355,7 @@ public class ComplianceService {
 
         subTemplateRepository.deleteById(id);
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Sub-Compliance Deleted",
                 "Sub-compliance \"" + subTemplate.getName() + "\" has been deleted.",
                 NotificationType.SUB_COMPLIANCE_DELETED,
@@ -1447,7 +1446,7 @@ public class ComplianceService {
         templateRepository.deleteById(id);
         log.info("Compliance template permanently deleted with ID: {}", id);
 
-        notificationEventService.notifySuperAdminsWithSave(
+        notificationEventService.notifySuperAdminsPushOnly(
                 "Compliance Deleted",
                 "Compliance \"" + template.getName() + "\" has been deleted.",
                 NotificationType.COMPLIANCE_DELETED,
@@ -1768,7 +1767,7 @@ if (parentCC == null) {
                         parentAssign.getDueDate()
                 );
 
-                notificationEventService.notifyUsersWithSave(
+                notificationEventService.notifyUsersPushOnly(
                         List.of(employeeId),
                         "New Compliance Assigned",
                         emailMsg,
@@ -2107,7 +2106,7 @@ if (parentCC == null) {
         ComplianceTemplate template = templateRepository.findById(templateId).orElse(null);
         if (company != null && template != null) {
             try {
-                notificationEventService.notifySuperAdminsWithSave(
+                notificationEventService.notifySuperAdminsPushOnly(
                         "Company Removed from Compliance",
                         "Company " + company.getName() + " has been removed from \"" + template.getName() + "\".",
                         NotificationType.COMPANY_REMOVED_FROM_COMPLIANCE,

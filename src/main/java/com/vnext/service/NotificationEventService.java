@@ -1,17 +1,14 @@
 package com.vnext.service;
 
-import com.vnext.entity.Notification;
 import com.vnext.entity.NotificationType;
 import com.vnext.entity.User;
 import com.vnext.entity.UserRole;
-import com.vnext.repository.NotificationRepository;
 import com.vnext.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -21,50 +18,27 @@ import java.util.stream.Collectors;
 @Slf4j
 public class NotificationEventService {
 
-    private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
     private final com.vnext.repository.CompanyRepository companyRepository;
     private final PushNotificationService pushNotificationService;
 
-    // ─── SAVE + PUSH (for SuperAdmin announcements) ─────────────────────────
+    // ─── PUSH ONLY (All notifications in the system are pure FCM push alerts) ───
 
-    @Transactional
     public void notifyUsersWithSave(List<Long> userIds, String title, String body, NotificationType type, String screen, String targetRole) {
-        var notification = new Notification();
-        notification.setTitle(title);
-        notification.setMessage(body);
-        notification.setIsActive(true);
-        notification.setNotificationType(type.name());
-        notification.setTargetRole(targetRole);
-        var saved = notificationRepository.save(notification);
-
-        if (userIds != null && !userIds.isEmpty()) {
-            var payload = NotificationPayload.builder()
-                    .title(title)
-                    .body(body)
-                    .type(type)
-                    .notificationId(saved.getId())
-                    .screen(screen)
-                    .build();
-
-            sendPushAsync(userIds, payload);
-        }
+        // Announcement persistence removed: purely FCM push
+        notifyUsersPushOnly(userIds, title, body, type, screen);
     }
 
     public void notifyUsersWithSave(List<Long> userIds, String title, String body, NotificationType type, String screen) {
-        notifyUsersWithSave(userIds, title, body, type, screen, null);
+        notifyUsersPushOnly(userIds, title, body, type, screen);
     }
 
     public void notifySuperAdminsWithSave(String title, String body, NotificationType type, String screen) {
-        var userIds = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN)
-                .stream().map(User::getId).collect(Collectors.toList());
-        notifyUsersWithSave(userIds, title, body, type, screen, UserRole.SUPER_ADMIN.name());
+        notifySuperAdminsPushOnly(title, body, type, screen);
     }
 
     public void notifyAllAdminsWithSave(String title, String body, NotificationType type, String screen) {
-        var userIds = userRepository.findAllByRoleInAndDeletedFalse(List.of(UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN))
-                .stream().map(User::getId).collect(Collectors.toList());
-        notifyUsersWithSave(userIds, title, body, type, screen, null);
+        notifyAllAdminsPushOnly(title, body, type, screen);
     }
 
     public void notifyAllAdminsPushOnly(String title, String body, NotificationType type, String screen) {
@@ -157,10 +131,7 @@ public class NotificationEventService {
     }
 
     public void notifyAllActiveCompanyAdminsWithSave(String title, String body, NotificationType type, String screen) {
-        List<Long> adminIds = getAllActiveCompanyAdminUserIds();
-        if (!adminIds.isEmpty()) {
-            notifyUsersWithSave(adminIds, title, body, type, screen, UserRole.COMPANY_ADMIN.name());
-        }
+        notifyAllActiveCompanyAdminsPushOnly(title, body, type, screen);
     }
 
     public void notifyCompanyUsersPushOnly(Long companyId, String title, String body, NotificationType type, String screen) {

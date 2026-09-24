@@ -59,4 +59,10 @@ public interface ComplianceSubTemplateRepository extends JpaRepository<Complianc
 
     @Query("SELECT st FROM ComplianceSubTemplate st WHERE st.parentTemplate.id = :parentId AND st.company.id = :companyId AND st.deleted = false ORDER BY st.displayOrder ASC")
     List<ComplianceSubTemplate> findCompanySubTemplatesByParent(@Param("parentId") Long parentId, @Param("companyId") Long companyId);
+
+    @Query("SELECT st FROM ComplianceSubTemplate st WHERE st.company.id = :companyId")
+    List<ComplianceSubTemplate> findByCompanyId(@Param("companyId") Long companyId);
+
+    @Query("SELECT st FROM ComplianceSubTemplate st WHERE st.parentTemplate.id = :parentTemplateId")
+    List<ComplianceSubTemplate> findAllByParentTemplateId(@Param("parentTemplateId") Long parentTemplateId);
 }

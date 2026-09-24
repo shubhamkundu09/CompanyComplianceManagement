@@ -85,9 +85,58 @@ public class JwtService {
                 .compact();
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.vnext.repository.NotificationScheduleConfigRepository scheduleConfigRepository;
+
+    private final java.util.concurrent.atomic.AtomicLong globalRevocationTimestamp = new java.util.concurrent.atomic.AtomicLong(0L);
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        try {
+            if (scheduleConfigRepository != null) {
+                scheduleConfigRepository.findByNotificationType("GLOBAL_JWT_REVOCATION")
+                        .ifPresent(cfg -> {
+                            if (cfg.getLastSentAt() != null) {
+                                long epoch = cfg.getLastSentAt().atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant().toEpochMilli();
+                                globalRevocationTimestamp.set(epoch);
+                            }
+                        });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public void revokeAllTokens() {
+        long now = System.currentTimeMillis();
+        globalRevocationTimestamp.set(now);
+        try {
+            if (scheduleConfigRepository != null) {
+                var cfg = scheduleConfigRepository.findByNotificationType("GLOBAL_JWT_REVOCATION")
+                        .orElseGet(() -> {
+                            var c = new com.vnext.entity.NotificationScheduleConfig();
+                            c.setNotificationType("GLOBAL_JWT_REVOCATION");
+                            c.setEnabled(true);
+                            c.setTimesPerDay(1);
+                            c.setStartHour(0);
+                            c.setEndHour(23);
+                            return c;
+                        });
+                cfg.setLastSentAt(java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Kolkata")));
+                scheduleConfigRepository.save(cfg);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public long getGlobalRevocationTimestamp() {
+        return globalRevocationTimestamp.get();
+    }
+
     public boolean isTokenValid(String token, UserDetails userDetails) {
         try {
             final String username = extractUsername(token);
+            Date issuedAt = extractClaim(token, Claims::getIssuedAt);
+            if (issuedAt != null && issuedAt.getTime() < globalRevocationTimestamp.get()) {
+                return false;
+            }
             return (username.equals(userDetails.getUsername())) && !isTokenExpired(token);
         } catch (Exception e) {
             return false;

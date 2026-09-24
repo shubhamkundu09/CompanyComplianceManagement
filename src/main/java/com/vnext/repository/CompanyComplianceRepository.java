@@ -444,8 +444,6 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
 
 
 
-
-
-
-
+    @Query("SELECT cc FROM CompanyCompliance cc WHERE cc.company.id = :companyId")
+    List<CompanyCompliance> findAllByCompanyIdRaw(@Param("companyId") Long companyId);
 }
