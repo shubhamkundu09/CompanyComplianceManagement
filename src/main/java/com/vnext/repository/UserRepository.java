@@ -25,6 +25,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query("SELECT u FROM User u WHERE u.role = :role AND (u.deleted IS NULL OR u.deleted = false)")
     List<User> findAllByRoleAndDeletedFalse(@Param("role") UserRole role);
 
+    @Query("SELECT u FROM User u WHERE u.deleted IS NULL OR u.deleted = false")
+    List<User> findAllByDeletedFalse();
+
     @Query("SELECT u FROM User u LEFT JOIN FETCH u.company WHERE u.id = :id AND u.deleted = false")
     Optional<User> findByIdWithCompany(@Param("id") Long id);
 

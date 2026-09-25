@@ -1201,31 +1201,6 @@
         </div>
         <div class="header-right">
 
-            <!-- Notifications -->
-            <div style="position:relative;">
-                <button class="header-btn" onclick="toggleNotifications()" title="FCM Push Alerts">
-                    <i class="fas fa-bell"></i>
-                    <span class="badge-count" id="notifBadge">0</span>
-                </button>
-
-                <div class="notification-dropdown" id="notificationDropdown">
-                    <div class="notification-header">
-                        <h4><i class="fas fa-mobile-alt" style="color:var(--primary);margin-right:8px;"></i> FCM Push Alerts</h4>
-                        <span class="mark-all" onclick="markAllRead()">Mark all as read</span>
-                    </div>
-                    <div id="notificationList">
-                        <div class="notification-empty">
-                            <i class="fas fa-check-circle" style="color:var(--success);"></i>
-                            <div style="margin-top:6px;font-weight:600;">Push Notifications Active</div>
-                            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">Dispatched to device drawers</div>
-                        </div>
-                    </div>
-                    <div class="notification-footer">
-                        <a href="${baseUrl}/super-admin/notifications">FCM Push Settings & Logs</a>
-                    </div>
-                </div>
-            </div>
-
             <!-- User -->
             <div class="header-user" onclick="window.location.href='${baseUrl}/super-admin/profile'">
                 <div class="avatar" id="userAvatar" style="width:32px;height:32px;font-size:12px;">U</div>

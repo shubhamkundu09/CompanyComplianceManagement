@@ -359,7 +359,7 @@ public class SchedulerService {
             List<Long> companyAdminIds = notificationEventService.getCompanyAdminUserIds(companyId);
 
             if (dueDate.equals(today)) {
-                // DUE TODAY
+                // DUE TODAY — notify Employee + Company Admin only (not SuperAdmin)
                 notificationEventService.notifyUserPushOnly(
                         assignment.getEmployeeId(),
                         "Compliance Due TODAY",
@@ -377,12 +377,6 @@ public class SchedulerService {
                             "compliance_details"
                     );
                 }
-                notificationEventService.notifySuperAdminsPushOnly(
-                        "Compliance Due TODAY",
-                        "Company " + companyName + " has compliance \"" + complianceName + "\" (Employee: " + employeeName + ") DUE TODAY (" + today + ").",
-                        NotificationType.COMPLIANCE_DUE_SOON,
-                        "compliance_details"
-                );
                 assignment.setLastReminderSent(today);
                 assignmentRepository.save(assignment);
             } else if (dueDate.isAfter(today)) {
@@ -392,6 +386,7 @@ public class SchedulerService {
                 boolean shouldSend = (daysRemaining <= reminderDays);
 
                 if (shouldSend) {
+                    // DUE SOON — notify Employee + Company Admin only (not SuperAdmin)
                     notificationEventService.notifyUserPushOnly(
                             assignment.getEmployeeId(),
                             "Compliance Due Soon",
@@ -409,13 +404,6 @@ public class SchedulerService {
                                 "compliance_details"
                         );
                     }
-
-                    notificationEventService.notifySuperAdminsPushOnly(
-                            "Compliance Due Soon",
-                            "Company " + companyName + " has compliance \"" + complianceName + "\" (Employee: " + employeeName + ") due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + ".",
-                            NotificationType.COMPLIANCE_DUE_SOON,
-                            "compliance_details"
-                    );
 
                     assignment.setLastReminderSent(today);
                     assignmentRepository.save(assignment);
@@ -509,7 +497,7 @@ public class SchedulerService {
             List<Long> companyAdminIds = notificationEventService.getCompanyAdminUserIds(companyId);
 
             if (dueDate.equals(today)) {
-                // DUE TODAY
+                // DUE TODAY — notify Company Admin only (not SuperAdmin)
                 log.info("Sending DUE TODAY reminder for compliance '{}' (ID: {}) to company '{}'", complianceTitle, cc.getId(), companyName);
                 if (!companyAdminIds.isEmpty()) {
                     notificationEventService.notifyUsersPushOnly(
@@ -520,12 +508,6 @@ public class SchedulerService {
                             "compliance_details"
                     );
                 }
-                notificationEventService.notifySuperAdminsPushOnly(
-                        "Company Compliance Due TODAY",
-                        "Company " + companyName + " compliance \"" + complianceTitle + "\" is DUE TODAY (" + today + ").",
-                        NotificationType.COMPLIANCE_DUE_SOON,
-                        "compliance_details"
-                );
             } else if (dueDate.isBefore(today)) {
                 // OVERDUE
                 long daysOverdue = ChronoUnit.DAYS.between(dueDate, today);
@@ -552,6 +534,7 @@ public class SchedulerService {
                 boolean shouldSend = (daysRemaining <= reminderDays);
 
                 if (shouldSend) {
+                    // DUE SOON — notify Company Admin only (not SuperAdmin)
                     log.info("Sending DUE SOON reminder for compliance '{}' (ID: {}, due in {} days) to company '{}'", complianceTitle, cc.getId(), daysRemaining, companyName);
                     if (!companyAdminIds.isEmpty()) {
                         notificationEventService.notifyUsersPushOnly(
@@ -562,12 +545,6 @@ public class SchedulerService {
                                 "compliance_details"
                         );
                     }
-                    notificationEventService.notifySuperAdminsPushOnly(
-                            "Compliance Due Soon",
-                            "Company " + companyName + " compliance \"" + complianceTitle + "\" is due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
-                            NotificationType.COMPLIANCE_DUE_SOON,
-                            "compliance_details"
-                    );
                 }
             }
         }
@@ -616,7 +593,7 @@ public class SchedulerService {
             info.setAssignedTo("Company Admin");
             overdueList.add(info);
 
-            // Push to Company Admin
+            // Push to Company Admin — overdue: always notify
             if (cc.getCompany() != null && cc.getCompany().getCompanyAdmin() != null) {
                 notificationEventService.notifyUserPushOnly(
                         cc.getCompany().getCompanyAdmin().getId(),
@@ -627,7 +604,26 @@ public class SchedulerService {
                 );
             }
 
-            // Push to SuperAdmins
+            // Push to assigned Employees — overdue: notify all assigned employees
+            if (cc.getConfig() != null) {
+                List<Long> assignedEmpIds = assignmentRepository.findByConfigIdAndIsActiveTrue(cc.getConfig().getId())
+                        .stream()
+                        .map(EmployeeAssignment::getEmployeeId)
+                        .filter(eid -> eid != null)
+                        .distinct()
+                        .collect(Collectors.toList());
+                if (!assignedEmpIds.isEmpty()) {
+                    notificationEventService.notifyUsersPushOnly(
+                            assignedEmpIds,
+                            "Compliance Overdue",
+                            "Company compliance \"" + complianceTitle + "\" is overdue. Immediate action required.",
+                            NotificationType.COMPLIANCE_OVERDUE,
+                            "employee_compliance"
+                    );
+                }
+            }
+
+            // Push to SuperAdmins — overdue: always notify
             notificationEventService.notifySuperAdminsPushOnly(
                     "Company Compliance Overdue",
                     "Company " + companyName + " has overdue compliance \"" + complianceTitle + "\".",
@@ -635,6 +631,7 @@ public class SchedulerService {
                     "compliance_details"
             );
         }
+
 
         // Send email to SuperAdmin
         User superAdmin = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).stream().findFirst().orElse(null);

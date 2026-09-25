@@ -698,7 +698,7 @@ public class SuperAdminController {
         return ApiResponse.success(mapToScheduleDTO(saved), "FCM push notification schedule updated successfully");
     }
 
-    @PostMapping("/notification-schedule/trigger-reminders-now")
+    @PostMapping({"/notification-schedule/trigger-reminders-now", "/notification-schedule/trigger-now"})
     public ApiResponse<String> triggerDueRemindersNow() {
         log.info("SuperAdmin manually triggered immediate due/overdue compliance reminder checks");
         schedulerService.executeDueReminderChecks();
@@ -891,6 +891,9 @@ public class SuperAdminController {
     public ApiResponse<String> sendTestPush(
             @RequestParam(required = false) String title,
             @RequestParam(required = false) String body,
+            @RequestParam(required = false) String targetRole,
+            @RequestParam(required = false) Long targetUserId,
+            @RequestParam(required = false) Long companyId,
             @CurrentUser User admin) {
 
         java.time.ZoneId istZone = java.time.ZoneId.of("Asia/Kolkata");
@@ -905,15 +908,38 @@ public class SuperAdminController {
                 .screen("notifications")
                 .build();
 
-        if (admin != null) {
-            pushNotificationService.sendToUser(admin.getId(), payload);
+        List<Long> recipientUserIds = new ArrayList<>();
+
+        if (targetUserId != null) {
+            recipientUserIds.add(targetUserId);
+        } else if (companyId != null) {
+            userRepository.findAllByCompanyIdAndDeletedFalse(companyId)
+                    .forEach(u -> recipientUserIds.add(u.getId()));
+        } else if (targetRole != null && !targetRole.isBlank() && !"ALL".equalsIgnoreCase(targetRole)) {
+            try {
+                UserRole role = UserRole.valueOf(targetRole.toUpperCase());
+                recipientUserIds.addAll(userRepository.findAllByRoleAndDeletedFalse(role)
+                        .stream().map(User::getId).collect(Collectors.toList()));
+            } catch (Exception ignored) {
+                recipientUserIds.addAll(userRepository.findAllByDeletedFalse()
+                        .stream().map(User::getId).collect(Collectors.toList()));
+            }
         } else {
-            List<Long> adminIds = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN)
-                    .stream().map(User::getId).collect(Collectors.toList());
-            pushNotificationService.sendToUsers(adminIds, payload);
+            // Default: Broadcast to ALL active users (SuperAdmin, Company Admins, and Employees)
+            recipientUserIds.addAll(userRepository.findAllByDeletedFalse()
+                    .stream().map(User::getId).collect(Collectors.toList()));
         }
 
-        return ApiResponse.success("Test FCM push notification dispatched to registered devices successfully!");
+        if (recipientUserIds.isEmpty() && admin != null) {
+            recipientUserIds.add(admin.getId());
+        }
+
+        log.info("SuperAdmin {} dispatched test push '{}' to {} user IDs: {}",
+                admin != null ? admin.getId() : "SYSTEM", pushTitle, recipientUserIds.size(), recipientUserIds);
+
+        pushNotificationService.sendToUsers(recipientUserIds, payload);
+
+        return ApiResponse.success("Test FCM push notification dispatched to " + recipientUserIds.size() + " user account(s) / registered device(s) successfully!");
     }
 
     // ==================== DEVICE FLEET & FORCE LOGOUT ====================

@@ -1125,13 +1125,7 @@
                <i class="fas fa-tasks"></i> My Compliances
            </a>
 
-           <div class="sidebar-label">Communication</div>
-           <a href="${baseUrl}/company-admin/notifications" class="nav-item ">
-               <i class="fas fa-bell"></i> Notifications
-               <span class="nav-badge" id="notifCount">0</span>
-           </a>
-
-           <div class="sidebar-label">Account</div>
+<div class="sidebar-label">Account</div>
            <a href="${baseUrl}/company-admin/change-password" class="nav-item">
                <i class="fas fa-key"></i> Change Password
            </a>
@@ -1152,30 +1146,6 @@
             <span class="page-title">Employees</span>
         </div>
         <div class="header-right">
-
-            <!-- Notifications -->
-            <div style="position:relative;">
-                <button class="header-btn" onclick="toggleNotifications()" title="Notifications">
-                    <i class="fas fa-bell"></i>
-                    <span class="badge-count" id="notifBadge">0</span>
-                </button>
-
-                <div class="notification-dropdown" id="notificationDropdown">
-                    <div class="notification-header">
-                        <h4><i class="fas fa-bell" style="color:var(--primary);margin-right:8px;"></i> Notifications</h4>
-                        <span class="mark-all" onclick="markAllRead()">Mark all as read</span>
-                    </div>
-                    <div id="notificationList">
-                        <div class="notification-empty">
-                            <i class="fas fa-spinner fa-spin"></i>
-                            <div style="margin-top:8px;">Loading...</div>
-                        </div>
-                    </div>
-                    <div class="notification-footer">
-                        <a href="${baseUrl}/company-admin/notifications">View all notifications</a>
-                    </div>
-                </div>
-            </div>
 
             <!-- User -->
             <div class="header-user" onclick="window.location.href='${baseUrl}/company-admin/company-details'">

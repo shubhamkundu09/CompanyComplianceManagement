@@ -1557,31 +1557,6 @@
         </div>
         <div class="header-right">
 
-            <!-- Notifications -->
-            <div style="position:relative;">
-                <button class="header-btn" onclick="toggleNotifications()" title="FCM Push Alerts">
-                    <i class="fas fa-bell"></i>
-                    <span class="badge-count" id="notifBadge">0</span>
-                </button>
-
-                <div class="notification-dropdown" id="notificationDropdown">
-                    <div class="notification-header">
-                        <h4><i class="fas fa-mobile-alt" style="color:var(--primary);margin-right:8px;"></i> FCM Push Alerts</h4>
-                        <span class="mark-all" onclick="markAllRead()">Mark all as read</span>
-                    </div>
-                    <div id="notificationList">
-                        <div class="notification-empty">
-                            <i class="fas fa-check-circle" style="color:var(--success);"></i>
-                            <div style="margin-top:6px;font-weight:600;">Push Notifications Active</div>
-                            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">Dispatched to device drawers</div>
-                        </div>
-                    </div>
-                    <div class="notification-footer">
-                        <a href="${baseUrl}/super-admin/notifications">FCM Push Settings & Logs</a>
-                    </div>
-                </div>
-            </div>
-
             <!-- User -->
             <div class="header-user" onclick="window.location.href='${baseUrl}/super-admin/profile'">
                 <div class="avatar" id="userAvatar" style="width:32px;height:32px;font-size:12px;">U</div>
@@ -1931,6 +1906,16 @@
                 <div style="background:var(--primary-bg);border:1px solid #c7d2fe;border-radius:8px;padding:12px;margin-bottom:16px;color:var(--primary-dark);font-size:12px;">
                     <i class="fas fa-info-circle" style="margin-right:6px;"></i>
                     This test will be delivered directly to the physical <strong>Android &amp; iOS devices</strong> registered to your SuperAdmin account.
+                </div>
+
+                <div style="margin-bottom:14px;">
+                    <label class="form-label">Target Audience</label>
+                    <select id="testPushTarget" class="form-select">
+                        <option value="ALL" selected>👥 All Users & Registered Devices (Broadcast to Company Admins & Employees)</option>
+                        <option value="COMPANY_ADMIN">🏢 Company Admins Only</option>
+                        <option value="EMPLOYEE">👷 Employees Only</option>
+                        <option value="SUPER_ADMIN">🛡️ SuperAdmin Only (Self Test)</option>
+                    </select>
                 </div>
 
                 <div style="margin-bottom:14px;">
@@ -2599,6 +2584,7 @@
 
         const title = document.getElementById('testPushTitle').value.trim();
         const body = document.getElementById('testPushBody').value.trim();
+        const target = document.getElementById('testPushTarget') ? document.getElementById('testPushTarget').value : 'ALL';
         const btn = document.getElementById('submitTestPushBtn');
         const origText = btn.innerHTML;
 
@@ -2606,7 +2592,9 @@
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Dispatched...';
 
         try {
-            const url = '/api/super-admin/notification-schedule/test-push?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
+            const url = '/api/super-admin/notification-schedule/test-push?title=' + encodeURIComponent(title) +
+                        '&body=' + encodeURIComponent(body) +
+                        '&targetRole=' + encodeURIComponent(target);
             const res = await api(url, { method: 'POST' });
 
             if (res && res.success) {

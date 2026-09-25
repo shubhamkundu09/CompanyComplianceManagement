@@ -1161,12 +1161,7 @@
             <i class="fas fa-tasks"></i> My Compliances
         </a>
 
-        <div class="sidebar-label">Communication</div>
-        <a href="${baseUrl}/company-admin/notifications" class="nav-item">
-            <i class="fas fa-bell"></i> Notifications
-        </a>
-
-        <div class="sidebar-label">Account</div>
+<div class="sidebar-label">Account</div>
         <a href="${baseUrl}/company-admin/change-password" class="nav-item">
             <i class="fas fa-key"></i> Change Password
         </a>
