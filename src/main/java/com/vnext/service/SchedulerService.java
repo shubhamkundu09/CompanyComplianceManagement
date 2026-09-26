@@ -33,6 +33,20 @@ public class SchedulerService {
     private final NotificationEventService notificationEventService;
     private final CompanyRepository companyRepository;
     private final NotificationScheduleConfigRepository scheduleConfigRepository;
+    private final UserPushNotificationRepository userPushNotificationRepository;
+
+    // ─── AUTO-PURGE PUSH NOTIFICATIONS OLDER THAN 5 MINUTES ──────────────────
+    @Scheduled(fixedRate = 60000, initialDelay = 5000) // runs every 60 seconds
+    @Transactional
+    public void purgeStalePushNotifications() {
+        LocalDateTime cutoff = LocalDateTime.now(IST_ZONE).minusMinutes(5);
+        try {
+            userPushNotificationRepository.deleteOlderThan(cutoff);
+            log.debug("Auto-purged user push notifications older than 5 minutes (cutoff: {})", cutoff);
+        } catch (Exception e) {
+            log.warn("Failed to purge stale push notifications: {}", e.getMessage());
+        }
+    }
 
     // ─── 1. RECURRING COMPLIANCE RENEWAL ──────────────────────────────────────
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Kolkata") // daily at 00:05 IST
@@ -421,6 +435,11 @@ public class SchedulerService {
             LocalDate dueDate = assignment.getDueDate();
             if (dueDate == null) continue;
 
+            // Send overdue reminder at most once per day
+            if (today.equals(assignment.getLastReminderSent())) {
+                continue;
+            }
+
             long daysOverdue = ChronoUnit.DAYS.between(dueDate, today);
             String complianceName = getComplianceName(assignment);
             String employeeName = getUserName(assignment.getEmployeeId());
@@ -452,6 +471,9 @@ public class SchedulerService {
                     NotificationType.COMPLIANCE_OVERDUE,
                     "compliance_details"
             );
+
+            assignment.setLastReminderSent(today);
+            assignmentRepository.save(assignment);
         }
 
         // ── 3. COMPANY-LEVEL COMPLIANCES (Due Soon, Due Today & Overdue) ──

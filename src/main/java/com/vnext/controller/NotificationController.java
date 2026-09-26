@@ -45,7 +45,13 @@ public class NotificationController {
         if (currentUser == null) {
             return ApiResponse.success(Collections.emptyList(), "Unauthenticated");
         }
-        List<UserPushNotification> list = userPushNotificationRepository.findPendingForUser(currentUser.getId(), afterId);
+        java.time.LocalDateTime cutoffTime = java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Kolkata")).minusMinutes(5);
+        List<UserPushNotification> list = userPushNotificationRepository.findRecentPendingForUser(
+                currentUser.getId(),
+                afterId != null ? afterId : 0L,
+                cutoffTime,
+                org.springframework.data.domain.PageRequest.of(0, 20)
+        );
         List<PushEventDTO> dtos = list.stream().map(upn -> {
             Map<String, String> data = new HashMap<>();
             if (upn.getNotificationType() != null) data.put("type", upn.getNotificationType());

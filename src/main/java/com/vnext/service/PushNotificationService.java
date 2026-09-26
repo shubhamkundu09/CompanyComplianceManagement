@@ -61,6 +61,14 @@ public class PushNotificationService {
         }
     }
 
+    private boolean isLoginNotification(NotificationPayload payload) {
+        if (payload == null || payload.getType() == null) return false;
+        var t = payload.getType();
+        return t == com.vnext.entity.NotificationType.SUPER_ADMIN_LOGIN
+                || t == com.vnext.entity.NotificationType.COMPANY_ADMIN_LOGIN
+                || t == com.vnext.entity.NotificationType.EMPLOYEE_LOGIN;
+    }
+
     public void sendToUser(Long userId, NotificationPayload payload) {
         sendToUserExcludingDevice(userId, null, payload);
     }
@@ -72,7 +80,9 @@ public class PushNotificationService {
                 traceId, userId, excludeToken, payload.getTitle(), payload.getBody());
         if (userId == null) return;
 
-        saveUserPushNotification(userId, payload);
+        if (!isLoginNotification(payload)) {
+            saveUserPushNotification(userId, payload);
+        }
 
         var tokens = deviceTokenRepository.findByUserId(userId)
                 .stream()
@@ -172,6 +182,7 @@ public class PushNotificationService {
             ApnsConfig apnsConfig = ApnsConfig.builder()
                     .putHeader("apns-priority", "10")
                     .putHeader("apns-push-type", "alert")
+                    .putHeader("apns-topic", "com.softsynth.vnext")
                     .setAps(Aps.builder()
                             .setAlert(ApsAlert.builder()
                                     .setTitle(payload.getTitle())
