@@ -148,7 +148,8 @@ class ComplianceSchedulerNotificationTest {
                 notificationEventService,
                 companyRepository,
                 scheduleConfigRepository,
-                userPushNotificationRepository
+                userPushNotificationRepository,
+                subTemplateRepository
         );
 
         Company company = new Company();
@@ -208,7 +209,8 @@ class ComplianceSchedulerNotificationTest {
                 notificationEventService,
                 companyRepository,
                 scheduleConfigRepository,
-                userPushNotificationRepository
+                userPushNotificationRepository,
+                subTemplateRepository
         );
 
         LocalDate today = LocalDate.now(IST);
@@ -242,7 +244,8 @@ class ComplianceSchedulerNotificationTest {
                 notificationEventService,
                 companyRepository,
                 scheduleConfigRepository,
-                userPushNotificationRepository
+                userPushNotificationRepository,
+                subTemplateRepository
         );
 
         NotificationScheduleConfig scheduleConfig = new NotificationScheduleConfig();
@@ -304,7 +307,8 @@ class ComplianceSchedulerNotificationTest {
                 notificationEventService,
                 companyRepository,
                 scheduleConfigRepository,
-                userPushNotificationRepository
+                userPushNotificationRepository,
+                subTemplateRepository
         );
 
         LocalDate today = LocalDate.now(IST);
@@ -355,5 +359,106 @@ class ComplianceSchedulerNotificationTest {
                 eq("employee_compliance")
         );
         assertTrue(scheduleConfig.getSentTodayCount() > 1, "sentTodayCount should advance beyond 1");
+    }
+
+    @Test
+    @DisplayName("Scheduler skips parent container compliances when sub-compliances exist to avoid false overdue alerts")
+    void testParentComplianceWithSubCompliancesIsSkippedInDueAndOverdueChecks() {
+        SchedulerService schedulerService = new SchedulerService(
+                assignmentRepository,
+                userRepository,
+                emailService,
+                companyComplianceRepository,
+                complianceService,
+                configRepository,
+                notificationEventService,
+                companyRepository,
+                scheduleConfigRepository,
+                userPushNotificationRepository,
+                subTemplateRepository
+        );
+
+        LocalDate today = LocalDate.now(IST);
+
+        Company company = new Company();
+        company.setId(10L);
+        company.setName("Proto Plus Tech");
+
+        ComplianceTemplate parentTemplate = new ComplianceTemplate();
+        parentTemplate.setId(100L);
+        parentTemplate.setName("Direct Taxes");
+
+        // Parent company compliance with status IN_PROGRESS
+        CompanyCompliance parentCC = new CompanyCompliance();
+        parentCC.setId(1L);
+        parentCC.setCompany(company);
+        parentCC.setTemplate(parentTemplate);
+        parentCC.setSubTemplate(null);
+        parentCC.setIsParent(true);
+        parentCC.setIsActive(true);
+        parentCC.setStatus(ComplianceStatus.IN_PROGRESS);
+
+        // Child sub-compliance
+        CompanyCompliance childCC = new CompanyCompliance();
+        childCC.setId(2L);
+        childCC.setCompany(company);
+        childCC.setTemplate(parentTemplate);
+        childCC.setIsParent(false);
+        childCC.setIsActive(true);
+
+        when(companyComplianceRepository.findAll()).thenReturn(List.of(parentCC));
+        when(companyComplianceRepository.findSubCompliancesByCompanyIdAndParentTemplateId(10L, 100L))
+                .thenReturn(List.of(childCC));
+
+        // When executing due reminder checks, parentCC should be skipped
+        schedulerService.executeDueReminderChecks();
+
+        // Verify no overdue notifications sent for parent container "Direct Taxes"
+        verify(notificationEventService, never()).notifySuperAdminsPushOnly(
+                contains("OVERDUE"),
+                contains("Direct Taxes"),
+                any(),
+                anyString()
+        );
+    }
+
+    @Test
+    @DisplayName("Scheduler skips parent employee assignments when child sub-assignments exist")
+    void testParentAssignmentWithChildSubAssignmentsIsSkipped() {
+        SchedulerService schedulerService = new SchedulerService(
+                assignmentRepository,
+                userRepository,
+                emailService,
+                companyComplianceRepository,
+                complianceService,
+                configRepository,
+                notificationEventService,
+                companyRepository,
+                scheduleConfigRepository,
+                userPushNotificationRepository,
+                subTemplateRepository
+        );
+
+        LocalDate today = LocalDate.now(IST);
+
+        EmployeeAssignment parentAssignment = new EmployeeAssignment();
+        parentAssignment.setId(50L);
+        parentAssignment.setEmployeeId(101L);
+        parentAssignment.setDueDate(today.minusDays(5)); // overdue date
+
+        when(assignmentRepository.findByDueDateBeforeAndCompletedAtIsNullAndIsActiveTrue(today))
+                .thenReturn(List.of(parentAssignment));
+        when(assignmentRepository.existsByParentAssignmentIdAndIsActiveTrue(50L)).thenReturn(true);
+
+        schedulerService.executeDueReminderChecks();
+
+        // Verify no notification sent for parent assignment
+        verify(notificationEventService, never()).notifyUserPushOnly(
+                eq(101L),
+                contains("OVERDUE"),
+                anyString(),
+                any(),
+                anyString()
+        );
     }
 }

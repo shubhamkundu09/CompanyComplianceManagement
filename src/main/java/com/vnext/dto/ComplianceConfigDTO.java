@@ -38,6 +38,8 @@ public class ComplianceConfigDTO {
     private Integer reminderIntervalDays;
 
     private Boolean editableForCompanies = false;
+    private Boolean isSemiEditable = false;
+    private com.vnext.entity.ComplianceTemplateType templateType;
     private Boolean canManage = false;
 
     private String description;

@@ -22,6 +22,9 @@ public class ParentComplianceDetailsDTO {
     private Boolean isCompanySpecific;  // Whether this is a custom compliance
     private Long companyId;              // The company that owns this custom compliance
     private Boolean canManage;           // Whether Company Admin can manage (add subs, configure)
+    private Boolean editableForCompanies;
+    private Boolean isSemiEditable;
+    private com.vnext.entity.ComplianceTemplateType templateType;
 
     private Integer totalSubCompliances;
     private Integer configuredSubCompliances;
@@ -43,5 +46,8 @@ public class ParentComplianceDetailsDTO {
         private String externalLink;
         private Integer reminderDaysBefore;
         private Boolean isCompanySpecific;  // NEW - to show if sub is custom
+        private Boolean isSemiEditable;
+        private Boolean canConfigure;
+        private Boolean canDelete;
     }
 }

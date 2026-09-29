@@ -92,7 +92,7 @@ public class NotificationEventService {
     public List<Long> getCompanyAdminUserIds(Long companyId) {
         java.util.Set<Long> adminIds = new java.util.HashSet<>();
         if (companyId != null) {
-            userRepository.findByCompanyIdAndRoleAndDeletedFalse(companyId, UserRole.COMPANY_ADMIN, Pageable.unpaged())
+            userRepository.findByCompanyIdAndRoleInAndDeletedFalse(companyId, List.of(UserRole.COMPANY_ADMIN, UserRole.SUB_ADMIN))
                     .forEach(u -> adminIds.add(u.getId()));
             companyRepository.findById(companyId).ifPresent(c -> {
                 if (c.getCompanyAdmin() != null && c.getCompanyAdmin().getId() != null) {
@@ -107,7 +107,7 @@ public class NotificationEventService {
         java.util.Set<Long> adminIds = new java.util.HashSet<>();
         List<com.vnext.entity.Company> activeCompanies = companyRepository.findActiveCompaniesByStatus(com.vnext.entity.CompanyStatus.ACTIVE);
         for (com.vnext.entity.Company c : activeCompanies) {
-            userRepository.findByCompanyIdAndRoleAndDeletedFalse(c.getId(), UserRole.COMPANY_ADMIN, Pageable.unpaged())
+            userRepository.findByCompanyIdAndRoleInAndDeletedFalse(c.getId(), List.of(UserRole.COMPANY_ADMIN, UserRole.SUB_ADMIN))
                     .forEach(u -> adminIds.add(u.getId()));
             if (c.getCompanyAdmin() != null && c.getCompanyAdmin().getId() != null) {
                 adminIds.add(c.getCompanyAdmin().getId());

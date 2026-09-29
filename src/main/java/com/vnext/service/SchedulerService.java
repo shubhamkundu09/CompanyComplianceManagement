@@ -34,6 +34,7 @@ public class SchedulerService {
     private final CompanyRepository companyRepository;
     private final NotificationScheduleConfigRepository scheduleConfigRepository;
     private final UserPushNotificationRepository userPushNotificationRepository;
+    private final ComplianceSubTemplateRepository subTemplateRepository;
 
     // ─── AUTO-PURGE PUSH NOTIFICATIONS OLDER THAN 5 MINUTES ──────────────────
     @Scheduled(fixedRate = 60000, initialDelay = 5000) // runs every 60 seconds
@@ -71,6 +72,7 @@ public class SchedulerService {
         }
 
         for (CompanyCompliance cc : completedRecurring) {
+            if (isParentWithSubCompliances(cc)) continue;
             ComplianceConfig config = cc.getConfig();
             ComplianceFrequency freq = config.getFrequency();
             LocalDate lastDueDate = config.getDueDate() != null ? config.getDueDate() : config.getCustomDueDate();
@@ -162,6 +164,10 @@ public class SchedulerService {
         log.info("Found {} overdue assignments", overdueAssignments.size());
 
         for (EmployeeAssignment assignment : overdueAssignments) {
+            // Skip parent assignments if child sub-assignments exist
+            if (assignmentRepository.existsByParentAssignmentIdAndIsActiveTrue(assignment.getId())) {
+                continue;
+            }
             var config = assignment.getConfig();
             int intervalDays = (config != null && config.getReminderIntervalDays() != null && config.getReminderIntervalDays() > 0) ? config.getReminderIntervalDays() : 3;
             boolean repeat = (config == null || config.getRepeatReminder() == null || Boolean.TRUE.equals(config.getRepeatReminder()));
@@ -361,6 +367,11 @@ public class SchedulerService {
         log.info("Found {} upcoming/due-today employee assignments for reminder check", upcomingAssignments.size());
 
         for (EmployeeAssignment assignment : upcomingAssignments) {
+            // Skip parent assignments if child sub-assignments exist
+            if (assignmentRepository.existsByParentAssignmentIdAndIsActiveTrue(assignment.getId())) {
+                continue;
+            }
+
             var config = assignment.getConfig();
             if (config == null) continue;
             LocalDate dueDate = assignment.getDueDate();
@@ -432,6 +443,11 @@ public class SchedulerService {
         log.info("Found {} overdue employee assignments for reminder check", overdueAssignments.size());
 
         for (EmployeeAssignment assignment : overdueAssignments) {
+            // Skip parent assignments if child sub-assignments exist
+            if (assignmentRepository.existsByParentAssignmentIdAndIsActiveTrue(assignment.getId())) {
+                continue;
+            }
+
             LocalDate dueDate = assignment.getDueDate();
             if (dueDate == null) continue;
 
@@ -486,6 +502,13 @@ public class SchedulerService {
         log.info("Found {} active company compliance records for reminder evaluation", activeCompanyCompliances.size());
 
         for (CompanyCompliance cc : activeCompanyCompliances) {
+            // Skip parent container compliances when sub-compliances exist
+            if (isParentWithSubCompliances(cc)) {
+                log.debug("Skipping parent compliance ID: {} ({}) for reminders as sub-compliances exist",
+                        cc.getId(), cc.getTemplate() != null ? cc.getTemplate().getName() : "Unknown");
+                continue;
+            }
+
             ComplianceConfig config = cc.getConfig();
             if (config == null) {
                 config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
@@ -493,7 +516,7 @@ public class SchedulerService {
             if (config == null && cc.getSubTemplate() != null) {
                 config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
             }
-            if (config == null && cc.getTemplate() != null) {
+            if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
                 config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
             }
             if (config == null) {
@@ -582,14 +605,27 @@ public class SchedulerService {
 
         LocalDate today = LocalDate.now(IST_ZONE);
 
-        // Find all active CompanyCompliances that are not completed and have effective due date < today
+        // Find all active CompanyCompliances that are not completed, not parent containers with sub-compliances, and have effective due date < today
         List<CompanyCompliance> overdueCCs = companyComplianceRepository.findAll().stream()
                 .filter(cc -> cc.getStatus() != ComplianceStatus.COMPLETED)
                 .filter(cc -> cc.getStatus() != ComplianceStatus.EXEMPTED)
-                .filter(cc -> cc.getIsActive() && !cc.isDeleted())
-                .filter(cc -> cc.getConfig() != null)
+                .filter(cc -> Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted())
+                .filter(cc -> !isParentWithSubCompliances(cc))
                 .filter(cc -> {
-                    LocalDate due = complianceService.calculateEffectiveDueDate(cc.getConfig());
+                    ComplianceConfig config = cc.getConfig();
+                    if (config == null) {
+                        config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
+                    }
+                    if (config == null && cc.getSubTemplate() != null) {
+                        config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+                    }
+                    if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
+                        config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+                    }
+                    if (config == null) return false;
+                    LocalDate due = config.getDueDate();
+                    if (due == null) due = config.getCustomDueDate();
+                    if (due == null) due = complianceService.calculateEffectiveDueDate(config);
                     return due != null && due.isBefore(today);
                 })
                 .collect(Collectors.toList());
@@ -602,9 +638,24 @@ public class SchedulerService {
         // Build email content and send FCM notifications
         List<EmailService.OverdueComplianceInfo> overdueList = new ArrayList<>();
         for (CompanyCompliance cc : overdueCCs) {
+            ComplianceConfig config = cc.getConfig();
+            if (config == null) {
+                config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
+            }
+            if (config == null && cc.getSubTemplate() != null) {
+                config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+            }
+            if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
+                config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+            }
+            LocalDate due = null;
+            if (config != null) {
+                due = config.getDueDate() != null ? config.getDueDate() : config.getCustomDueDate();
+                if (due == null) due = complianceService.calculateEffectiveDueDate(config);
+            }
+
             String complianceTitle = cc.getSubTemplate() != null ? cc.getSubTemplate().getName() : (cc.getTemplate() != null ? cc.getTemplate().getName() : "Compliance");
             String companyName = cc.getCompany() != null ? cc.getCompany().getName() : "Company";
-            LocalDate due = complianceService.calculateEffectiveDueDate(cc.getConfig());
 
             EmailService.OverdueComplianceInfo info = new EmailService.OverdueComplianceInfo();
             info.setCompanyName(companyName);
@@ -627,8 +678,8 @@ public class SchedulerService {
             }
 
             // Push to assigned Employees — overdue: notify all assigned employees
-            if (cc.getConfig() != null) {
-                List<Long> assignedEmpIds = assignmentRepository.findByConfigIdAndIsActiveTrue(cc.getConfig().getId())
+            if (config != null) {
+                List<Long> assignedEmpIds = assignmentRepository.findByConfigIdAndIsActiveTrue(config.getId())
                         .stream()
                         .map(EmployeeAssignment::getEmployeeId)
                         .filter(eid -> eid != null)
@@ -664,6 +715,32 @@ public class SchedulerService {
     }
 
     // ─── HELPER METHODS ──────────────────────────────────────────────────────
+
+    /**
+     * Checks if a CompanyCompliance is a parent container compliance that groups sub-compliances.
+     * Parent container compliances do not represent direct action items and should not trigger
+     * due/overdue alerts on their own (only individual sub-compliances trigger alerts).
+     */
+    private boolean isParentWithSubCompliances(CompanyCompliance cc) {
+        if (cc == null || cc.getTemplate() == null) return false;
+        // If this is an actual sub-compliance (has subTemplate or isParent is false), it is NOT a parent container
+        if (cc.getSubTemplate() != null || Boolean.FALSE.equals(cc.getIsParent())) {
+            return false;
+        }
+        // If this is a parent compliance, check if sub-compliances exist for this company & template
+        if (cc.getCompany() != null) {
+            List<CompanyCompliance> subs = companyComplianceRepository.findSubCompliancesByCompanyIdAndParentTemplateId(
+                    cc.getCompany().getId(), cc.getTemplate().getId());
+            if (subs != null && !subs.isEmpty()) {
+                return true;
+            }
+        }
+        // Also check if the template has active sub-templates
+        if (subTemplateRepository != null) {
+            return !subTemplateRepository.findByParentTemplateIdAndIsActiveTrueOrderByDisplayOrderAsc(cc.getTemplate().getId()).isEmpty();
+        }
+        return false;
+    }
 
     private String getComplianceName(EmployeeAssignment assignment) {
         if (assignment == null) return "Compliance";

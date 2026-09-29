@@ -177,6 +177,13 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "WHERE cc.company.id = :companyId AND cc.template.id = :templateId AND cc.isParent = true AND cc.deleted = false")
     boolean existsByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(@Param("companyId") Long companyId, @Param("templateId") Long templateId);
 
+    @Query("SELECT cc FROM CompanyCompliance cc WHERE cc.template.id = :templateId AND cc.isParent = true AND cc.deleted = false")
+    List<CompanyCompliance> findAllByTemplateIdAndIsParentTrueAndDeletedFalse(@Param("templateId") Long templateId);
+
+    @Query("SELECT COUNT(cc) > 0 FROM CompanyCompliance cc " +
+            "WHERE cc.company.id = :companyId AND cc.subTemplate.id = :subTemplateId AND cc.deleted = false")
+    boolean existsByCompanyIdAndSubTemplateIdAndDeletedFalse(@Param("companyId") Long companyId, @Param("subTemplateId") Long subTemplateId);
+
 
     // ==================== FILTERED QUERIES ====================
 

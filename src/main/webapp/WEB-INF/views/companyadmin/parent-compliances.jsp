@@ -791,6 +791,7 @@
                     <select id="typeFilter" class="form-input">
                         <option value="all">All Categories</option>
                         <option value="editable">Editable (Company Sub-Compliances)</option>
+                        <option value="semieditable">Semi-Editable (Company Configured)</option>
                         <option value="noneditable">Non-Editable (Admin Managed)</option>
                     </select>
                 </div>
@@ -1101,13 +1102,18 @@
                 '<a href="' + contextPath + "/company-admin/compliance/parent/" + complianceId + '/assign" class="vnext-btn vnext-btn-outline" style="text-align:center;padding:7px 12px;font-size:12px;" onclick="event.stopPropagation();" title="Assign to Employees"><i class="fas fa-user-plus"></i> Assign</a>';
         }
 
-        var categoryBadge = canManage
-            ? '<span class="vnext-badge vnext-badge-warning" style="background:rgba(245,158,11,0.15);color:var(--warning);border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
-            : '<span class="vnext-badge vnext-badge-info"><i class="fas fa-lock"></i> Non-Editable</span>';
+        var isSemi = item.templateType === 'SEMI_EDITABLE' || item.isSemiEditable === true;
+        var categoryBadge = isSemi
+            ? '<span class="vnext-badge" style="background:rgba(139,92,246,0.15);color:#7c3aed;border:1px solid rgba(139,92,246,0.3);"><i class="fas fa-sliders-h"></i> Semi-Editable</span>'
+            : (canManage
+                ? '<span class="vnext-badge vnext-badge-warning" style="background:rgba(245,158,11,0.15);color:var(--warning);border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
+                : '<span class="vnext-badge vnext-badge-info"><i class="fas fa-lock"></i> Non-Editable</span>');
 
-        var metaItem = canManage
-            ? '<span class="vnext-meta-item" style="color:var(--warning);"><i class="fas fa-unlock"></i> Can Add Sub-Compliances</span>'
-            : '<span class="vnext-meta-item"><i class="fas fa-lock"></i> Read-only</span>';
+        var metaItem = isSemi
+            ? '<span class="vnext-meta-item" style="color:#7c3aed;"><i class="fas fa-sliders-h"></i> Company Configurable</span>'
+            : (canManage
+                ? '<span class="vnext-meta-item" style="color:var(--warning);"><i class="fas fa-unlock"></i> Can Add Sub-Compliances</span>'
+                : '<span class="vnext-meta-item"><i class="fas fa-lock"></i> Read-only</span>');
 
         return (
             '<div class="compliance-card" style="position:relative;" onclick="' + clickFn + '">' +
@@ -1231,12 +1237,15 @@
 
                 if (!parentMap[templateId]) {
                     var canManage = item.canManage === true || item.editableForCompanies === true;
+                    var isSemi = item.isSemiEditable === true || item.templateType === 'SEMI_EDITABLE';
                     parentMap[templateId] = {
                         templateId: templateId,
                         id: templateId,
                         templateName: item.templateName || 'Unknown',
                         canManage: canManage,
                         editableForCompanies: canManage,
+                        isSemiEditable: isSemi,
+                        templateType: item.templateType || (isSemi ? 'SEMI_EDITABLE' : (canManage ? 'EDITABLE' : 'NON_EDITABLE')),
                         subCompliances: [],
                         parentConfig: null,
                         status: 'PENDING',
@@ -1365,7 +1374,8 @@
 
         filteredCompliances = groupedCompliances.filter(function(item) {
             if (typeFilter === 'editable' && !item.canManage) return false;
-            if (typeFilter === 'noneditable' && item.canManage) return false;
+            if (typeFilter === 'semieditable' && !item.isSemiEditable) return false;
+            if (typeFilter === 'noneditable' && (item.canManage || item.isSemiEditable)) return false;
             if (statusFilter !== 'all' && (item.status || 'PENDING') !== statusFilter) return false;
             if (searchTerm && !item.templateName.toLowerCase().includes(searchTerm)) return false;
             return true;

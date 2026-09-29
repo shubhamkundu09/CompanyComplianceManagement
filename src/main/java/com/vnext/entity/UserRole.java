@@ -4,6 +4,7 @@ package com.vnext.entity;
 public enum UserRole {
     SUPER_ADMIN("Super Administrator"),
     COMPANY_ADMIN("Company Administrator"),
+    SUB_ADMIN("Sub Administrator"),
     EMPLOYEE("Employee");
 
     private final String displayName;

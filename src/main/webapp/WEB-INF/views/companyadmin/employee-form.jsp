@@ -1031,6 +1031,7 @@
                             <label class="form-label">User Role <span class="required">*</span></label>
                             <select id="role" class="form-input" required>
                                 <option value="EMPLOYEE" selected>Employee</option>
+                                <option value="SUB_ADMIN" id="subAdminOption">Sub-Admin</option>
                             </select>
                         </div>
                     </div>
@@ -1392,11 +1393,11 @@
 
         var url, method;
         if (isEdit) {
-            url = '/api/company-admin/employees/' + employeeId;
+            url = role === 'SUB_ADMIN' ? ('/api/company-admin/sub-admins/' + employeeId) : ('/api/company-admin/employees/' + employeeId);
             method = 'PUT';
         } else {
-            // Double-check limit
-            if (companyInfo) {
+            // Double-check limit for regular employees
+            if (role !== 'SUB_ADMIN' && companyInfo) {
                 var activeCount = companyInfo.currentEmployeeCount || 0;
                 var limit = companyInfo.employeeLimit || 0;
                 if (activeCount >= limit) {
@@ -1407,7 +1408,7 @@
                 }
             }
 
-            url = '/api/company-admin/employees';
+            url = role === 'SUB_ADMIN' ? '/api/company-admin/sub-admins' : '/api/company-admin/employees';
             method = 'POST';
         }
 

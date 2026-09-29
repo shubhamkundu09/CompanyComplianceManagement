@@ -33,7 +33,6 @@ public class EmployeeDTO {
     private String employeeCode;
     private Long reportingManagerId;
 
-    // ADD THIS - Role field for creating sub-admin or employee
-    @NotNull(message = "User role is required")
-    private UserRole role;  // Can be COMPANY_ADMIN or EMPLOYEE
+    // Role field for creating sub-admin or employee (defaults according to endpoint if not specified)
+    private UserRole role;
 }

@@ -37,4 +37,8 @@ public class CompanyComplianceDTO {
     // ===== ADD PRIORITY FIELD =====
     private Integer priority;
     private Boolean isParent;
+
+    private String templateType;
+    private Boolean isSemiEditable;
+    private Boolean editableForCompanies;
 }

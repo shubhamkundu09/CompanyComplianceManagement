@@ -1453,9 +1453,12 @@
             var isAssigned = assignedSet.has(item.id) || (item.templateId && assignedSet.has(item.templateId));
             if (isAssigned) checkedCount++;
 
-            var typeBadge = item.canManage === true
-                ? '<span style="background:rgba(245,158,11,0.12);color:var(--warning);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-edit"></i> Editable</span>'
-                : '<span style="background:rgba(79,70,229,0.1);color:var(--primary);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-lock"></i> Admin Managed</span>';
+            var isSemi = item.templateType === 'SEMI_EDITABLE' || item.isSemiEditable === true;
+            var typeBadge = isSemi
+                ? '<span style="background:rgba(139,92,246,0.15);color:#7c3aed;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-sliders-h"></i> Semi-Editable</span>'
+                : (item.canManage === true
+                    ? '<span style="background:rgba(245,158,11,0.12);color:var(--warning);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-edit"></i> Editable</span>'
+                    : '<span style="background:rgba(79,70,229,0.1);color:var(--primary);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-lock"></i> Admin Managed</span>');
 
             var subBadge = subsCount > 0 
                 ? '<span style="background:rgba(30,58,138,0.08);color:var(--primary);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-list"></i> ' + subsCount + ' Sub-Compliances</span>'
@@ -1758,9 +1761,13 @@
         var status = document.getElementById('statusFilter').value;
         var dept = document.getElementById('deptFilter').value;
 
-        // Load compliance stats for each employee
+        // Load compliance stats for each employee (skip sub-admins)
         for (var i = 0; i < employees.length; i++) {
             var emp = employees[i];
+            if (emp.role === 'SUB_ADMIN') {
+                emp.complianceStats = { total: 0, completed: 0, inProgress: 0, pending: 0, overdue: 0 };
+                continue;
+            }
             try {
                 var complianceData = await api('/api/company-admin/compliance/employee/' + emp.id + '/compliances?page=0&size=100');
                 if (complianceData && complianceData.success) {
@@ -1831,7 +1838,23 @@
                              (stats.overdue > 0 ? 'fa-exclamation-triangle' :
                              (stats.inProgress > 0 ? 'fa-spinner fa-pulse' : 'fa-clock'));
 
+            var isSubAdmin = (emp.role === 'SUB_ADMIN');
+            var roleBadge = isSubAdmin ? '<span style="background:rgba(99,102,241,0.12);color:#6366f1;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;margin-left:4px;">Sub-Admin</span>' : '';
+
             var complianceText = stats.total > 0 ? stats.completed + '/' + stats.total + ' completed' : 'No compliances';
+
+            var complianceColumnHtml = isSubAdmin
+                ? '<span class="badge" style="background:rgba(99,102,241,0.12);color:#6366f1;font-weight:600;font-size:11px;padding:5px 9px;" title="Sub-Admin has administrative access to all company compliances"><i class="fas fa-shield-alt" style="margin-right:4px;"></i> All Compliances</span>'
+                : '<button onclick="viewEmployeeCompliances(' + emp.id + ', \'' + escapeHtml(fullName) + '\', \'' + escapeHtml(emp.email) + '\')" class="btn btn-ghost" style="padding:4px 10px;font-size:11px;" title="View Compliances">' +
+                      '<i class="fas ' + overallIcon + '" style="margin-right:4px;color:' + (overallClass === 'compliance-completed' ? 'var(--success)' : overallClass === 'compliance-overdue' ? 'var(--danger)' : 'var(--warning)') + ';"></i> ' +
+                      complianceText +
+                  '</button>';
+
+            var assignBtnHtml = isSubAdmin
+                ? ''
+                : '<button onclick="openAssignCompliancesModal(' + emp.id + ', \'' + escapeHtml(fullName) + '\')" class="btn btn-primary" style="padding:5px 8px;" title="Assign Parent Compliances">' +
+                      '<i class="fas fa-tasks" style="font-size:12px;"></i>' +
+                  '</button>';
 
             html += '<tr>' +
                 '<td style="color:var(--gray-500);font-size:12px;">' + (currentPage * pageSize + i + 1) + '</td>' +
@@ -1839,7 +1862,7 @@
                     '<div style="display:flex;align-items:center;gap:10px;">' +
                         '<div class="avatar" style="width:34px;height:34px;font-size:12px;">' + escapeHtml(initials || '?') + '</div>' +
                         '<div>' +
-                            '<div style="font-weight:600;font-size:13px;">' + escapeHtml(fullName) + '</div>' +
+                            '<div style="font-weight:600;font-size:13px;display:flex;align-items:center;">' + escapeHtml(fullName) + roleBadge + '</div>' +
                             '<div style="font-size:11px;color:var(--gray-500);">' + escapeHtml(emp.email) + '</div>' +
                         '</div>' +
                     '</div>' +
@@ -1847,19 +1870,12 @@
                 '<td style="font-size:12px;"><span style="background:rgba(226,232,240,0.3);padding:3px 8px;border-radius:12px;font-family:monospace;">' + escapeHtml(emp.employeeCode || '—') + '</span></td>' +
                 '<td style="font-size:13px;">' + escapeHtml(emp.designation || '—') + '</td>' +
                 '<td style="font-size:12px;color:var(--gray-500);">' + escapeHtml(emp.department || '—') + '</td>' +
-                '<td>' +
-                    '<button onclick="viewEmployeeCompliances(' + emp.id + ', \'' + escapeHtml(fullName) + '\', \'' + escapeHtml(emp.email) + '\')" class="btn btn-ghost" style="padding:4px 10px;font-size:11px;" title="View Compliances">' +
-                        '<i class="fas ' + overallIcon + '" style="margin-right:4px;color:' + (overallClass === 'compliance-completed' ? 'var(--success)' : overallClass === 'compliance-overdue' ? 'var(--danger)' : 'var(--warning)') + ';"></i> ' +
-                        complianceText +
-                    '</button>' +
-                '</td>' +
+                '<td>' + complianceColumnHtml + '</td>' +
                 '<td><span class="badge ' + statusClass + '"><i class="fas fa-circle" style="font-size:5px;"></i> ' + emp.status + '</span></td>' +
                 '<td style="font-size:12px;color:var(--gray-500);">' + formatDate(emp.createdAt) + '</td>' +
                 '<td style="text-align:center;">' +
                     '<div style="display:flex;gap:4px;justify-content:center;">' +
-                        '<button onclick="openAssignCompliancesModal(' + emp.id + ', \'' + escapeHtml(fullName) + '\')" class="btn btn-primary" style="padding:5px 8px;" title="Assign Parent Compliances">' +
-                            '<i class="fas fa-tasks" style="font-size:12px;"></i>' +
-                        '</button>' +
+                        assignBtnHtml +
                         '<a href="' + contextPath + '/company-admin/employees/' + emp.id + '" class="btn btn-ghost" style="padding:5px 8px;" title="View">' +
                             '<i class="fas fa-eye" style="font-size:12px;"></i>' +
                         '</a>' +

@@ -130,6 +130,16 @@ public class User extends BaseEntity implements UserDetails {
         return role == UserRole.COMPANY_ADMIN;
     }
 
+    // Helper method to check if user is sub admin
+    public boolean isSubAdmin() {
+        return role == UserRole.SUB_ADMIN;
+    }
+
+    // Helper method to check if user is either company admin or sub admin
+    public boolean isCompanyAdminOrSubAdmin() {
+        return role == UserRole.COMPANY_ADMIN || role == UserRole.SUB_ADMIN;
+    }
+
     // Helper method to check if user is employee
     public boolean isEmployee() {
         return role == UserRole.EMPLOYEE;

@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -41,6 +42,9 @@ public class EmployeeService {
             throw new BusinessException("Company has been deleted.");
         }
 
+        // Check if company can add new member (active count < limit)
+        companyService.canAddEmployee(companyId);
+
         if (userRepository.existsByEmail(employeeDTO.getEmail())) {
             throw new BusinessException("Email already registered: " + employeeDTO.getEmail());
         }
@@ -54,7 +58,7 @@ public class EmployeeService {
         subAdmin.setLastName(employeeDTO.getLastName());
         subAdmin.setEmail(employeeDTO.getEmail());
         subAdmin.setPassword(encodedPassword);
-        subAdmin.setRole(UserRole.COMPANY_ADMIN);  // Same role as Company Admin
+        subAdmin.setRole(UserRole.SUB_ADMIN);  // Sub Administrator role
         subAdmin.setStatus(UserStatus.ACTIVE);
         subAdmin.setCompany(company);
         subAdmin.setPhoneNumber(employeeDTO.getPhone());
@@ -65,12 +69,37 @@ public class EmployeeService {
 
         User saved = userRepository.save(subAdmin);
 
+        // Update company active employee/sub-admin count
+        companyService.updateActiveEmployeeCount(companyId);
+
         // Send credentials email
-        emailService.sendCredentialsEmail(
-                employeeDTO.getEmail(),
-                employeeDTO.getFirstName(),
-                employeeDTO.getEmail(),
-                tempPassword
+        try {
+            emailService.sendCredentialsEmail(
+                    employeeDTO.getEmail(),
+                    employeeDTO.getFirstName(),
+                    employeeDTO.getEmail(),
+                    tempPassword
+            );
+        } catch (Exception e) {
+            log.error("Failed to send credentials email to sub-admin: {}", employeeDTO.getEmail(), e);
+        }
+
+        // Push notification to Company Admin and SuperAdmins
+        if (company.getCompanyAdmin() != null) {
+            notificationEventService.notifyUserPushOnly(
+                    company.getCompanyAdmin().getId(),
+                    "Sub-Admin Created",
+                    "Sub-Admin " + saved.getFullName() + " has been added to " + company.getName() + ".",
+                    NotificationType.EMPLOYEE_CREATED,
+                    "employees"
+            );
+        }
+
+        notificationEventService.notifySuperAdminsPushOnly(
+                "Sub-Admin Created",
+                "Sub-Admin " + saved.getFullName() + " has been added to " + company.getName() + ".",
+                NotificationType.EMPLOYEE_CREATED,
+                "employees"
         );
 
         log.info("Sub-admin created successfully with ID: {}", saved.getId());
@@ -80,8 +109,81 @@ public class EmployeeService {
     @Transactional(readOnly = true)
     public Page<EmployeeResponseDTO> getSubAdminsByCompany(Long companyId, Pageable pageable) {
         log.info("Fetching sub-admins for company ID: {}", companyId);
-        Page<User> subAdmins = userRepository.findByCompanyIdAndRoleAndDeletedFalse(companyId, UserRole.COMPANY_ADMIN, pageable);
+        Page<User> subAdmins = userRepository.findByCompanyIdAndRoleAndDeletedFalse(companyId, UserRole.SUB_ADMIN, pageable);
         return subAdmins.map(this::convertToDTO);
+    }
+
+    @Transactional
+    public EmployeeResponseDTO updateSubAdmin(Long subAdminId, EmployeeDTO employeeDTO) {
+        log.info("Updating sub-admin with ID: {}", subAdminId);
+
+        User subAdmin = userRepository.findById(subAdminId)
+                .orElseThrow(() -> new ResourceNotFoundException("Sub-admin not found with ID: " + subAdminId));
+
+        if (subAdmin.getRole() != UserRole.SUB_ADMIN) {
+            throw new BusinessException("User is not a sub-admin");
+        }
+
+        if (!subAdmin.getEmail().equalsIgnoreCase(employeeDTO.getEmail()) &&
+                userRepository.existsByEmail(employeeDTO.getEmail())) {
+            throw new BusinessException("Email already registered: " + employeeDTO.getEmail());
+        }
+
+        subAdmin.setFirstName(employeeDTO.getFirstName());
+        subAdmin.setLastName(employeeDTO.getLastName());
+        subAdmin.setEmail(employeeDTO.getEmail());
+        subAdmin.setPhoneNumber(employeeDTO.getPhone());
+        subAdmin.setDesignation(employeeDTO.getDesignation());
+        subAdmin.setDepartment(employeeDTO.getDepartment());
+
+        User updatedSubAdmin = userRepository.save(subAdmin);
+
+        if (subAdmin.getCompany() != null && subAdmin.getCompany().getCompanyAdmin() != null) {
+            notificationEventService.notifyUserPushOnly(
+                    subAdmin.getCompany().getCompanyAdmin().getId(),
+                    "Sub-Admin Profile Updated",
+                    "Profile for sub-admin " + updatedSubAdmin.getFullName() + " has been updated.",
+                    NotificationType.EMPLOYEE_UPDATED,
+                    "employees"
+            );
+        }
+
+        log.info("Sub-admin updated successfully with ID: {}", updatedSubAdmin.getId());
+        return convertToDTO(updatedSubAdmin);
+    }
+
+    @Transactional
+    public void deleteSubAdmin(Long subAdminId) {
+        log.info("Deleting sub-admin with ID: {}", subAdminId);
+
+        User subAdmin = userRepository.findById(subAdminId)
+                .orElseThrow(() -> new ResourceNotFoundException("Sub-admin not found with ID: " + subAdminId));
+
+        if (subAdmin.getRole() != UserRole.SUB_ADMIN) {
+            throw new BusinessException("User is not a sub-admin");
+        }
+
+        subAdmin.setDeleted(true);
+        subAdmin.setStatus(UserStatus.DEACTIVE);
+        subAdmin.setEmail(subAdmin.getEmail() + "_deleted_" + System.currentTimeMillis());
+        userRepository.save(subAdmin);
+
+        // Update company active count
+        if (subAdmin.getCompany() != null) {
+            companyService.updateActiveEmployeeCount(subAdmin.getCompany().getId());
+        }
+
+        if (subAdmin.getCompany() != null && subAdmin.getCompany().getCompanyAdmin() != null) {
+            notificationEventService.notifyUserPushOnly(
+                    subAdmin.getCompany().getCompanyAdmin().getId(),
+                    "Sub-Admin Removed",
+                    "Sub-Admin " + subAdmin.getFullName() + " has been removed from your company.",
+                    NotificationType.EMPLOYEE_DELETED,
+                    "employees"
+            );
+        }
+
+        log.info("Sub-admin deleted successfully with ID: {}", subAdminId);
     }
 
 
@@ -278,20 +380,19 @@ public class EmployeeService {
 
     @Transactional
     public EmployeeResponseDTO updateEmployeeStatus(Long employeeId, UserStatus status) {
-        log.info("Updating employee status: {} for employee ID: {}", status, employeeId);
+        log.info("Updating status: {} for user ID: {}", status, employeeId);
 
         User employee = userRepository.findById(employeeId)
-                .orElseThrow(() -> new ResourceNotFoundException("Employee not found with ID: " + employeeId));
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + employeeId));
 
-        if (employee.getRole() != UserRole.EMPLOYEE) {
-            throw new BusinessException("User is not an employee");
+        if (employee.getRole() != UserRole.EMPLOYEE && employee.getRole() != UserRole.SUB_ADMIN) {
+            throw new BusinessException("User is not an employee or sub-admin");
         }
 
         UserStatus oldStatus = employee.getStatus();
 
-        // If trying to ACTIVATE an employee
-        if (status == UserStatus.ACTIVE && oldStatus == UserStatus.DEACTIVE) {
-            // Check if company has capacity for another active employee
+        // If trying to ACTIVATE an employee or sub-admin (check company capacity)
+        if (status == UserStatus.ACTIVE && oldStatus == UserStatus.DEACTIVE && employee.getCompany() != null) {
             Long companyId = employee.getCompany().getId();
             companyService.canActivateEmployee(companyId);
         }
@@ -304,7 +405,7 @@ public class EmployeeService {
             companyService.updateActiveEmployeeCount(employee.getCompany().getId());
         }
 
-        log.info("Employee status updated successfully for ID: {} from {} to {}",
+        log.info("User status updated successfully for ID: {} from {} to {}",
                 employeeId, oldStatus, status);
 
         return convertToDTO(updatedEmployee);
@@ -366,9 +467,10 @@ public class EmployeeService {
     public Page<EmployeeResponseDTO> getEmployeesByCompany(Long companyId, String search, Pageable pageable) {
         companyService.getCompanyEntityById(companyId);
         String s = (search == null || search.isBlank()) ? null : search.trim();
+        List<UserRole> roles = List.of(UserRole.EMPLOYEE, UserRole.SUB_ADMIN);
         Page<User> employees = (s != null)
-                ? userRepository.searchByCompanyAndRole(companyId, UserRole.EMPLOYEE, s, pageable)
-                : userRepository.findByCompanyIdAndRoleAndDeletedFalse(companyId, UserRole.EMPLOYEE, pageable);
+                ? userRepository.searchByCompanyAndRoleIn(companyId, roles, s, pageable)
+                : userRepository.findByCompanyIdAndRoleInAndDeletedFalse(companyId, roles, pageable);
         return employees.map(this::convertToDTO);
     }
 
@@ -378,11 +480,10 @@ public class EmployeeService {
         // Verify company exists
         companyService.getCompanyEntityById(companyId);
 
-        // This requires a custom query, for now fetch all and filter
-        Page<User> employees = userRepository.findByCompanyIdAndRoleAndDeletedFalse(
-                companyId, UserRole.EMPLOYEE, pageable);
+        // Fetch both employees and sub-admins with the requested status
+        Page<User> employees = userRepository.findByCompanyIdAndRoleAndStatusAndDeletedFalse(
+                companyId, UserRole.EMPLOYEE, status, pageable);
 
-        // Filter by status (consider adding custom query in repository for better performance)
         return employees.map(this::convertToDTO);
     }
 
@@ -395,8 +496,8 @@ public class EmployeeService {
         User employee = userRepository.findById(employeeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found with ID: " + employeeId));
 
-        if (employee.getRole() != UserRole.EMPLOYEE) {
-            throw new BusinessException("User is not an employee");
+        if (employee.getRole() != UserRole.EMPLOYEE && employee.getRole() != UserRole.SUB_ADMIN) {
+            throw new BusinessException("User is not an employee or sub-admin");
         }
 
         if (employee.isDeleted()) {
@@ -412,8 +513,8 @@ public class EmployeeService {
         User employee = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found with email: " + email));
 
-        if (employee.getRole() != UserRole.EMPLOYEE) {
-            throw new BusinessException("User is not an employee");
+        if (employee.getRole() != UserRole.EMPLOYEE && employee.getRole() != UserRole.SUB_ADMIN) {
+            throw new BusinessException("User is not an employee or sub-admin");
         }
 
         if (employee.isDeleted()) {
@@ -494,7 +595,7 @@ public class EmployeeService {
     public long getEmployeeCountByCompany(Long companyId) {
         log.info("Getting employee count for company ID: {}", companyId);
 
-        return userRepository.countByCompanyIdAndRoleAndStatus(companyId, UserRole.EMPLOYEE, UserStatus.ACTIVE);
+        return userRepository.countByCompanyIdAndRoleInAndStatus(companyId, List.of(UserRole.EMPLOYEE, UserRole.SUB_ADMIN), UserStatus.ACTIVE);
     }
 
     // Update the count methods
@@ -554,7 +655,7 @@ public class EmployeeService {
     }
 
     // In EmployeeService.java, update the convertToDTO method
-    private EmployeeResponseDTO convertToDTO(User employee) {
+    public EmployeeResponseDTO convertToDTO(User employee) {
         EmployeeResponseDTO dto = new EmployeeResponseDTO();
         dto.setId(employee.getId());
         dto.setFirstName(employee.getFirstName());

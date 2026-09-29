@@ -64,15 +64,29 @@ public class ComplianceService {
         template.setIsActive(true);
         template.setIsCompanySpecific(false);
         template.setPriority(dto.getPriority() != null ? dto.getPriority() : 0);
-        template.setEditableForCompanies(dto.getEditableForCompanies() != null && dto.getEditableForCompanies());
+
+        // Resolve template type
+        if (dto.getTemplateType() == ComplianceTemplateType.SEMI_EDITABLE || Boolean.TRUE.equals(dto.getIsSemiEditable())) {
+            template.setTemplateType(ComplianceTemplateType.SEMI_EDITABLE);
+            template.setIsSemiEditable(true);
+            template.setEditableForCompanies(false);
+        } else if (dto.getTemplateType() == ComplianceTemplateType.EDITABLE || Boolean.TRUE.equals(dto.getEditableForCompanies())) {
+            template.setTemplateType(ComplianceTemplateType.EDITABLE);
+            template.setIsSemiEditable(false);
+            template.setEditableForCompanies(true);
+        } else {
+            template.setTemplateType(ComplianceTemplateType.NON_EDITABLE);
+            template.setIsSemiEditable(false);
+            template.setEditableForCompanies(false);
+        }
         template.setCreatedBy(adminId);
 
         ComplianceTemplate saved = templateRepository.save(template);
-        log.info("Compliance template created with ID: {}", saved.getId());
+        log.info("Compliance template created with ID: {} and type: {}", saved.getId(), saved.resolveTemplateType());
 
-        // Auto-assign template to all active companies ONLY IF EDITABLE
-        if (Boolean.TRUE.equals(saved.getEditableForCompanies())) {
-            log.info("Editable compliance template created – auto‑assigning to all active companies");
+        // Auto-assign template to all active companies IF EDITABLE OR SEMI-EDITABLE
+        if (saved.isEditable() || saved.isSemiEditable()) {
+            log.info("Editable or Semi-editable compliance template created – auto‑assigning to all active companies");
             assignComplianceToAllActiveCompanies(saved.getId(), adminId);
         } else {
             log.info("Non-editable compliance template created – will be assigned after sub-compliances are configured by SuperAdmin");
@@ -126,8 +140,8 @@ public class ComplianceService {
         ComplianceTemplate parent = templateRepository.findById(parentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Parent template not found"));
 
-        // NEW: if parent is editable, disallow SuperAdmin from adding global sub‑templates
-        if (Boolean.TRUE.equals(parent.getEditableForCompanies())) {
+        // If parent is fully editable, disallow SuperAdmin from adding global sub‑templates
+        if (parent.isEditable()) {
             throw new BusinessException("This compliance is editable by companies; SuperAdmin cannot add global sub‑compliances. Companies will manage their own sub‑compliances.");
         }
 
@@ -146,6 +160,35 @@ public class ComplianceService {
 
         ComplianceSubTemplate saved = subTemplateRepository.save(subTemplate);
         log.info("Sub-template created with ID: {} and displayOrder: {}", saved.getId(), saved.getDisplayOrder());
+
+        // If parent is semi-editable, auto-assign this new sub-template to all companies that have this parent assigned!
+        if (parent.isSemiEditable()) {
+            log.info("Semi-editable parent template sub-compliance created – auto-distributing to assigned companies");
+            List<CompanyCompliance> parentCCs = companyComplianceRepository
+                    .findAllByTemplateIdAndIsParentTrueAndDeletedFalse(parentId);
+            for (CompanyCompliance parentCC : parentCCs) {
+                Company company = parentCC.getCompany();
+                if (company != null && company.getStatus() == CompanyStatus.ACTIVE && !company.isDeleted()) {
+                    boolean subExists = companyComplianceRepository
+                            .existsByCompanyIdAndSubTemplateIdAndDeletedFalse(company.getId(), saved.getId());
+                    if (!subExists) {
+                        CompanyCompliance subCC = new CompanyCompliance();
+                        subCC.setCompany(company);
+                        subCC.setTemplate(parent);
+                        subCC.setSubTemplate(saved);
+                        subCC.setIsParent(false);
+                        subCC.setParentTemplateId(parentId);
+                        subCC.setStatus(ComplianceStatus.PENDING);
+                        subCC.setIsActive(true);
+                        subCC.setCreatedBy(adminId);
+                        subCC.setIsSuperAdminConfig(true);
+                        subCC.setAdminNotes("Auto-created from SuperAdmin semi-editable sub-template");
+                        companyComplianceRepository.save(subCC);
+                        log.info("Auto-assigned semi-editable sub-compliance {} to company {}", saved.getName(), company.getName());
+                    }
+                }
+            }
+        }
 
         // Add history for sub-template creation at template level
         addHistoryForTemplate(parentId, "Sub-Compliance Added",
@@ -167,7 +210,7 @@ public class ComplianceService {
         ComplianceSubTemplate subTemplate = subTemplateRepository.findByIdAndIsActiveTrue(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Sub-template not found"));
 
-        if (Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+        if (subTemplate.getParentTemplate().isEditable()) {
             throw new BusinessException("SuperAdmin cannot edit sub-compliances for editable compliance categories.");
         }
 
@@ -200,7 +243,7 @@ public class ComplianceService {
             throw new BusinessException("You do not have permission to edit this sub-compliance.");
         }
 
-        if (!Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+        if (!subTemplate.getParentTemplate().isEditable()) {
             throw new BusinessException("Parent compliance is non-editable; sub-compliance cannot be modified.");
         }
 
@@ -240,7 +283,7 @@ public class ComplianceService {
                 .orElseThrow(() -> new ResourceNotFoundException("Parent template not found"));
 
         // Only allowed if parent is editable and assigned to this company
-        if (!Boolean.TRUE.equals(parent.getEditableForCompanies())) {
+        if (!parent.isEditable()) {
             throw new BusinessException("This compliance is not editable by companies. You cannot add sub‑compliances.");
         }
 
@@ -311,12 +354,12 @@ public class ComplianceService {
                 .orElseThrow(() -> new ResourceNotFoundException("Parent template not found"));
 
         List<ComplianceSubTemplate> subTemplates;
-        if (Boolean.TRUE.equals(parent.getEditableForCompanies())) {
+        if (parent.isEditable()) {
             // For editable, fetch company‑specific sub‑templates
             subTemplates = subTemplateRepository
                     .findByParentTemplateIdAndCompanyIdAndIsActiveTrueOrderByDisplayOrderAsc(parentId, companyId);
         } else {
-            // For non‑editable, fetch global sub‑templates (company IS NULL)
+            // For non‑editable and semi-editable, fetch global sub‑templates (company IS NULL)
             subTemplates = subTemplateRepository
                     .findByParentTemplateIdAndCompanyIsNullAndIsActiveTrueOrderByDisplayOrderAsc(parentId);
         }
@@ -333,7 +376,7 @@ public class ComplianceService {
         ComplianceTemplate template = templateRepository.findById(templateId)
                 .orElseThrow(() -> new ResourceNotFoundException("Compliance template not found with ID: " + templateId));
 
-        if (!Boolean.TRUE.equals(template.getEditableForCompanies())) {
+        if (!template.isEditable()) {
             throw new BusinessException("This compliance template is not editable.");
         }
 
@@ -510,10 +553,11 @@ public class ComplianceService {
             }
         }
 
-        // Determine if parent is editable
-        boolean editable = Boolean.TRUE.equals(template.getEditableForCompanies());
+        // Determine if parent is editable or semi-editable
+        boolean editable = template.isEditable();
+        boolean semiEditable = template.isSemiEditable();
 
-        // ---- FIX: For editable templates, we never fetch or create sub‑compliances ----
+        // For non-editable and semi-editable templates, fetch global sub-templates
         List<ComplianceSubTemplate> subTemplates = new ArrayList<>();
         Map<Long, ComplianceConfig> subTemplateConfigMap = new HashMap<>();
 
@@ -521,22 +565,24 @@ public class ComplianceService {
             // Only fetch sub‑templates if NOT editable (global sub‑templates from SuperAdmin)
             subTemplates = subTemplateRepository
                     .findByParentTemplateIdAndCompanyIsNullAndIsActiveTrueOrderByDisplayOrderAsc(templateId);
-            for (ComplianceSubTemplate sub : subTemplates) {
-                Optional<ComplianceConfig> configOpt = configRepository
-                        .findBySubTemplateIdAndCompanyComplianceIsNull(sub.getId());
-                if (configOpt.isPresent()) {
-                    subTemplateConfigMap.put(sub.getId(), configOpt.get());
+            if (!semiEditable) {
+                for (ComplianceSubTemplate sub : subTemplates) {
+                    Optional<ComplianceConfig> configOpt = configRepository
+                            .findBySubTemplateIdAndCompanyComplianceIsNull(sub.getId());
+                    if (configOpt.isPresent()) {
+                        subTemplateConfigMap.put(sub.getId(), configOpt.get());
+                    }
                 }
             }
         }
 
         // Get parent‑level config (only if non‑editable and no sub‑templates)
         ComplianceConfig parentTemplateConfig = null;
-        if (!editable && subTemplates.isEmpty()) {
+        if (!editable && !semiEditable && subTemplates.isEmpty()) {
             parentTemplateConfig = template.getDirectConfig();
         }
 
-        // 1. Create parent CompanyCompliance (always, for both editable and non‑editable)
+        // 1. Create parent CompanyCompliance (always, for editable, semi-editable, and non‑editable)
         CompanyCompliance parentCC = new CompanyCompliance();
         parentCC.setCompany(company);
         parentCC.setTemplate(template);
@@ -550,7 +596,7 @@ public class ComplianceService {
         parentCC = companyComplianceRepository.save(parentCC);
         log.info("Created parent CompanyCompliance ID: {}", parentCC.getId());
 
-        // 2. Create sub‑compliances ONLY if non‑editable and sub‑templates exist
+        // 2. Create sub‑compliances if not fully editable and sub‑templates exist
         if (!editable && !subTemplates.isEmpty()) {
             for (ComplianceSubTemplate subTemplate : subTemplates) {
                 CompanyCompliance subCC = new CompanyCompliance();
@@ -559,7 +605,7 @@ public class ComplianceService {
                 subCC.setSubTemplate(subTemplate);
                 subCC.setIsParent(false);
                 subCC.setParentTemplateId(templateId);
-                subCC.setStatus(ComplianceStatus.IN_PROGRESS);
+                subCC.setStatus(semiEditable ? ComplianceStatus.PENDING : ComplianceStatus.IN_PROGRESS);
                 subCC.setIsActive(true);
                 subCC.setCreatedBy(adminId);
                 subCC.setIsSuperAdminConfig(true);
@@ -567,25 +613,27 @@ public class ComplianceService {
                 subCC = companyComplianceRepository.save(subCC);
                 log.info("Created sub CompanyCompliance ID: {} for sub-template: {}", subCC.getId(), subTemplate.getId());
 
-                // Copy configuration from template‑level to company‑specific config
-                ComplianceConfig sourceConfig = subTemplateConfigMap.get(subTemplate.getId());
-                if (sourceConfig != null) {
-                    copyConfigToCompany(sourceConfig, subCC, adminId);
+                // Copy configuration from template‑level to company‑specific config only for non-editable
+                if (!semiEditable) {
+                    ComplianceConfig sourceConfig = subTemplateConfigMap.get(subTemplate.getId());
+                    if (sourceConfig != null) {
+                        copyConfigToCompany(sourceConfig, subCC, adminId);
+                    }
                 }
             }
-        } else if (!editable && parentTemplateConfig != null) {
+        } else if (!editable && !semiEditable && parentTemplateConfig != null) {
             // No sub‑templates, parent has config (non‑editable, single‑level)
             copyConfigToCompany(parentTemplateConfig, parentCC, adminId);
         } else {
             // Editable: only parent created, no sub‑compliances.
-            log.info("Editable compliance assigned; company admin will manage sub‑compliances.");
+            log.info("Compliance assigned; sub-compliances managed according to template type: {}", template.resolveTemplateType());
         }
 
         // Add history for the parent assignment
         addHistoryForCompanyCompliance(parentCC, null, parentCC.getStatus(),
                 "Compliance Assigned",
                 "Compliance auto-assigned on company creation: " + template.getName() +
-                        (editable ? " (editable)" : ""),
+                        (editable ? " (editable)" : (semiEditable ? " (semi-editable)" : "")),
                 admin);
 
         log.info("=== Compliance assigned successfully to company: {} ===", companyId);
@@ -708,8 +756,12 @@ public class ComplianceService {
         dto.setCompanyId(parentCC.getCompany().getId());
 
         // Determine if company can manage (add sub‑compliances)
-        Boolean editable = parentCC.getTemplate().getEditableForCompanies();
+        Boolean editable = parentCC.getTemplate().isEditable();
+        Boolean semiEditable = parentCC.getTemplate().isSemiEditable();
         dto.setCanManage(editable != null && editable);
+        dto.setEditableForCompanies(editable);
+        dto.setIsSemiEditable(semiEditable);
+        dto.setTemplateType(parentCC.getTemplate().resolveTemplateType());
 
         // Get sub‑compliances based on editable flag
         List<CompanyCompliance> subCompliances;
@@ -717,7 +769,7 @@ public class ComplianceService {
             subCompliances = companyComplianceRepository
                     .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, parentCC.getTemplate().getId());
         } else {
-            // For non‑editable, fetch all sub‑compliances for this company and parent
+            // For non‑editable and semi-editable, fetch all sub‑compliances for this company and parent
             subCompliances = companyComplianceRepository
                     .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, parentCC.getTemplate().getId());
         }
@@ -743,6 +795,9 @@ public class ComplianceService {
 
             subDto.setIsActive(subCC.getIsActive());
             subDto.setStatus(subCC.getStatus());
+            subDto.setIsSemiEditable(semiEditable);
+            subDto.setCanConfigure(Boolean.TRUE.equals(semiEditable) || Boolean.TRUE.equals(editable));
+            subDto.setCanDelete(Boolean.TRUE.equals(editable) && !Boolean.TRUE.equals(semiEditable));
 
             boolean hasConfig = configRepository.existsByCompanyComplianceId(subCC.getId());
             subDto.setIsConfigured(hasConfig);
@@ -866,8 +921,8 @@ public class ComplianceService {
         ComplianceSubTemplate subTemplate = subTemplateRepository.findByIdAndIsActiveTrue(subTemplateId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sub-template not found"));
 
-        if (Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
-            throw new BusinessException("SuperAdmin cannot configure sub-compliances for editable compliance categories. Companies manage their own sub-compliances.");
+        if (subTemplate.getParentTemplate().isEditable() || subTemplate.getParentTemplate().isSemiEditable()) {
+            throw new BusinessException("SuperAdmin cannot configure sub-compliances for editable or semi-editable compliance categories. Companies manage their own sub-compliances.");
         }
 
         // Get or create template‑level config
@@ -1275,7 +1330,7 @@ public class ComplianceService {
         ComplianceSubTemplate subTemplate = subTemplateRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Sub-template not found"));
 
-        if (Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+        if (subTemplate.getParentTemplate().isEditable()) {
             throw new BusinessException("Sub-compliances under editable compliance categories can only be managed by companies.");
         }
 
@@ -1293,7 +1348,7 @@ public class ComplianceService {
             throw new BusinessException("You do not have permission to delete this sub-compliance.");
         }
 
-        if (!Boolean.TRUE.equals(subTemplate.getParentTemplate().getEditableForCompanies())) {
+        if (!subTemplate.getParentTemplate().isEditable()) {
             throw new BusinessException("Parent compliance is non-editable; sub-compliance cannot be deleted.");
         }
 
@@ -1794,6 +1849,10 @@ if (parentCC == null) {
         User employee = userRepository.findById(employeeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found with ID: " + employeeId));
 
+        if (employee.getRole() == UserRole.SUB_ADMIN) {
+            throw new BusinessException("Sub-admins have full access to all company compliances and cannot be assigned individually.");
+        }
+
         if (employee.getCompany() == null || !employee.getCompany().getId().equals(companyId)) {
             throw new BusinessException("Employee does not belong to your company");
         }
@@ -1822,6 +1881,11 @@ if (parentCC == null) {
     @Transactional(readOnly = true)
     public Set<Long> getAssignedParentComplianceIdsForEmployee(Long employeeId, Long companyId) {
         log.info("Fetching assigned parent compliance IDs for employee: {} in company: {}", employeeId, companyId);
+        User employee = userRepository.findById(employeeId).orElse(null);
+        if (employee != null && employee.getRole() == UserRole.SUB_ADMIN) {
+            return Collections.emptySet();
+        }
+
         List<EmployeeAssignment> assignments = assignmentRepository.findByEmployeeIdAndIsActiveTrue(employeeId);
         Set<Long> parentIds = new HashSet<>();
 
@@ -1988,6 +2052,13 @@ if (parentCC == null) {
     @Transactional
     public void syncParentCompliancesForEmployee(Long employeeId, List<Long> parentComplianceIds, Long companyId, Long adminId) {
         log.info("Syncing parent compliances for employee ID: {}, target IDs: {}", employeeId, parentComplianceIds);
+        User employee = userRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found with ID: " + employeeId));
+
+        if (employee.getRole() == UserRole.SUB_ADMIN) {
+            throw new BusinessException("Sub-admins have full access to all company compliances and cannot be assigned individually.");
+        }
+
         if (parentComplianceIds == null) {
             parentComplianceIds = Collections.emptyList();
         }
@@ -2630,6 +2701,9 @@ if (parentCC == null) {
         dto.setName(template.getName());
         dto.setDescription(template.getDescription());
         dto.setIsActive(template.getIsActive());
+        dto.setEditableForCompanies(template.isEditable());
+        dto.setIsSemiEditable(template.isSemiEditable());
+        dto.setTemplateType(template.resolveTemplateType());
         dto.setCreatedAt(template.getCreatedAt());
         dto.setUpdatedAt(template.getUpdatedAt());
 
@@ -2872,7 +2946,9 @@ if (parentCC == null) {
             dto.setIsActive(template.getIsActive());
             dto.setIsCompanySpecific(template.getIsCompanySpecific());
             dto.setPriority(template.getPriority());
-            dto.setEditableForCompanies(template.getEditableForCompanies() != null && template.getEditableForCompanies());
+            dto.setEditableForCompanies(template.isEditable());
+            dto.setIsSemiEditable(template.isSemiEditable());
+            dto.setTemplateType(template.resolveTemplateType());
             dto.setCreatedAt(template.getCreatedAt());
             dto.setUpdatedAt(template.getUpdatedAt());
             dto.setSubTemplateCount(subCountMap.getOrDefault(template.getId(), 0));
@@ -3156,7 +3232,9 @@ if (parentCC == null) {
         dto.setCompanyId(template.getCompany() != null ? template.getCompany().getId() : null);
         dto.setCompanyName(template.getCompany() != null ? template.getCompany().getName() : null);
         dto.setPriority(template.getPriority() != null ? template.getPriority() : 0);
-        dto.setEditableForCompanies(template.getEditableForCompanies() != null && template.getEditableForCompanies());
+        dto.setEditableForCompanies(template.isEditable());
+        dto.setIsSemiEditable(template.isSemiEditable());
+        dto.setTemplateType(template.resolveTemplateType());
         dto.setCreatedAt(template.getCreatedAt());
         return dto;
     }
@@ -3271,6 +3349,9 @@ if (parentCC == null) {
             dto.setTemplateName(cc.getTemplate().getName());
             dto.setCategory(cc.getTemplate().getName());
             dto.setPriority(cc.getTemplate().getPriority() != null ? cc.getTemplate().getPriority() : 0);
+            dto.setTemplateType(cc.getTemplate().resolveTemplateType().name());
+            dto.setIsSemiEditable(cc.getTemplate().isSemiEditable());
+            dto.setEditableForCompanies(cc.getTemplate().isEditable());
         }
 
         dto.setIsParent(cc.isParent());

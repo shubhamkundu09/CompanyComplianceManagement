@@ -1093,7 +1093,7 @@
                 if (data && data.success && data.data) {
                     var list = data.data || [];
                     var editableList = list.filter(function(item) {
-                        return item.canManage === true;
+                        return item.canManage === true && !item.isSemiEditable && item.templateType !== 'SEMI_EDITABLE';
                     });
 
                     if (editableList.length === 0) {

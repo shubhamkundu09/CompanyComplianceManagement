@@ -1622,7 +1622,7 @@
                     </label>
                     <div style="display:flex;flex-direction:column;gap:10px;background:var(--gray-50);padding:14px;border-radius:var(--radius);border:1px solid var(--gray-200);">
                         <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
-                            <input type="radio" name="complianceTypeRadio" id="typeNonEditable" value="false" checked style="margin-top:3px;accent-color:var(--primary);">
+                            <input type="radio" name="complianceTypeRadio" id="typeNonEditable" value="NON_EDITABLE" checked style="margin-top:3px;accent-color:var(--primary);">
                             <div>
                                 <strong style="font-size:13px;color:var(--gray-900);"><i class="fas fa-lock" style="color:var(--primary);margin-right:4px;"></i> Non-Editable Compliance (Admin Managed)</strong>
                                 <p style="font-size:12px;color:var(--gray-500);margin-top:2px;">SuperAdmin creates, configures, and manages all sub-compliances centrally for all companies.</p>
@@ -1630,16 +1630,24 @@
                         </label>
                         <hr style="border:0;border-top:1px solid var(--gray-200);margin:2px 0;">
                         <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
-                            <input type="radio" name="complianceTypeRadio" id="typeEditable" value="true" style="margin-top:3px;accent-color:var(--warning);">
+                            <input type="radio" name="complianceTypeRadio" id="typeSemiEditable" value="SEMI_EDITABLE" style="margin-top:3px;accent-color:#8b5cf6;">
+                            <div>
+                                <strong style="font-size:13px;color:var(--gray-900);"><i class="fas fa-sliders-h" style="color:#8b5cf6;margin-right:4px;"></i> Semi-Editable Compliance (Company Configured)</strong>
+                                <p style="font-size:12px;color:var(--gray-500);margin-top:2px;">SuperAdmin creates the sub-compliances; companies configure their own due dates & frequencies.</p>
+                            </div>
+                        </label>
+                        <hr style="border:0;border-top:1px solid var(--gray-200);margin:2px 0;">
+                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                            <input type="radio" name="complianceTypeRadio" id="typeEditable" value="EDITABLE" style="margin-top:3px;accent-color:var(--warning);">
                             <div>
                                 <strong style="font-size:13px;color:var(--gray-900);"><i class="fas fa-edit" style="color:var(--warning);margin-right:4px;"></i> Editable Compliance (Company Managed)</strong>
-                                <p style="font-size:12px;color:var(--gray-500);margin-top:2px;">SuperAdmin creates the category, but companies add, configure, and manage their own sub-compliances.</p>
+                                <p style="font-size:12px;color:var(--gray-500);margin-top:2px;">SuperAdmin creates the category; companies add, configure, and manage their own sub-compliances.</p>
                             </div>
                         </label>
                     </div>
                 </div>
                 <div class="modal-info-box" id="modalInfoBox">
-                    <i class="fas fa-info-circle"></i> Non-Editable Compliance allows SuperAdmin to create, configure, and manage all sub-compliances centrally.
+                    <i class="fas fa-info-circle"></i> Non-Editable: centrally managed | Semi-Editable: SuperAdmin defines tasks, company configures dates | Editable: company custom.
                 </div>
             </form>
         </div>
@@ -2173,10 +2181,13 @@
           // Get the icon based on the template name
           var iconClass = getComplianceIcon(t.name);
 
-          var isEditable = t.editableForCompanies === true;
-          var typeBadge = isEditable
-              ? '<span class="badge badge-warning" style="background:rgba(245,158,11,0.12);color:#d97706;border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
-              : '<span class="badge badge-primary" style="background:rgba(79,70,229,0.12);color:var(--primary);border:1px solid rgba(79,70,229,0.3);"><i class="fas fa-lock"></i> Non-Editable Category</span>';
+          var isEditable = t.templateType === 'EDITABLE' || t.editableForCompanies === true;
+          var isSemiEditable = t.templateType === 'SEMI_EDITABLE' || t.isSemiEditable === true;
+          var typeBadge = isSemiEditable
+              ? '<span class="badge" style="background:rgba(139,92,246,0.12);color:#7c3aed;border:1px solid rgba(139,92,246,0.3);"><i class="fas fa-sliders-h"></i> Semi-Editable</span>'
+              : (isEditable
+                  ? '<span class="badge badge-warning" style="background:rgba(245,158,11,0.12);color:#d97706;border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
+                  : '<span class="badge badge-primary" style="background:rgba(79,70,229,0.12);color:var(--primary);border:1px solid rgba(79,70,229,0.3);"><i class="fas fa-lock"></i> Non-Editable Category</span>');
 
           return (
               '<div class="' + cardClass + '">' +
@@ -2284,6 +2295,7 @@
         document.getElementById('templateForm').reset();
         document.getElementById('typeNonEditable').checked = true;
         document.getElementById('typeNonEditable').disabled = false;
+        document.getElementById('typeSemiEditable').disabled = false;
         document.getElementById('typeEditable').disabled = false;
         document.getElementById('typeLockNote').style.display = 'none';
         document.getElementById('templateModal').style.display = 'flex';
@@ -2302,12 +2314,15 @@
            var t = data.data;
            document.getElementById('name').value = t.name;
            document.getElementById('description').value = t.description || '';
-           if (t.editableForCompanies === true) {
+           if (t.templateType === 'SEMI_EDITABLE' || t.isSemiEditable === true) {
+               document.getElementById('typeSemiEditable').checked = true;
+           } else if (t.templateType === 'EDITABLE' || t.editableForCompanies === true) {
                document.getElementById('typeEditable').checked = true;
            } else {
                document.getElementById('typeNonEditable').checked = true;
            }
            document.getElementById('typeNonEditable').disabled = true;
+           document.getElementById('typeSemiEditable').disabled = true;
            document.getElementById('typeEditable').disabled = true;
            document.getElementById('typeLockNote').style.display = 'inline';
            document.getElementById('priority').value = t.priority || 0;
@@ -2330,12 +2345,16 @@
              return;
          }
 
+         var isSemiEditable = document.getElementById('typeSemiEditable').checked;
          var isEditable = document.getElementById('typeEditable').checked;
+         var templateType = isSemiEditable ? 'SEMI_EDITABLE' : (isEditable ? 'EDITABLE' : 'NON_EDITABLE');
 
          var payload = {
                      name: name,
                      description: description,
                      priority: priority,
+                     templateType: templateType,
+                     isSemiEditable: isSemiEditable,
                      editableForCompanies: isEditable
                  };
 

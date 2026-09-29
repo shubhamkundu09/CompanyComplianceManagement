@@ -2,6 +2,7 @@ package com.vnext.controller;
 
 import com.vnext.dto.*;
 import com.vnext.entity.*;
+import com.vnext.exception.BusinessException;
 import com.vnext.exception.ResourceNotFoundException;
 import com.vnext.repository.CompanyComplianceRepository;
 import com.vnext.repository.ComplianceConfigRepository;
@@ -28,7 +29,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/company-admin")
-@PreAuthorize("hasRole('COMPANY_ADMIN')")
+@PreAuthorize("hasAnyRole('COMPANY_ADMIN', 'SUB_ADMIN')")
 @RequiredArgsConstructor
 @Slf4j
 public class CompanyAdminController {
@@ -46,22 +47,44 @@ public class CompanyAdminController {
     private final EmployeeAssignmentRepository assignmentRepository;
     private final UserRepository userRepository;
 
+    private Long getCompanyId(User user) {
+        if (user == null) {
+            throw new org.springframework.security.access.AccessDeniedException("User is not authenticated");
+        }
+        if (user.getCompany() != null && user.getCompany().getId() != null) {
+            return user.getCompany().getId();
+        }
+        User fresh = userRepository.findByIdWithCompany(user.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + user.getId()));
+        if (fresh.getCompany() == null) {
+            throw new BusinessException("No company assigned to this account");
+        }
+        return fresh.getCompany().getId();
+    }
+
     // ==================== COMPANY DETAILS ====================
 
     @GetMapping("/company")
     public ApiResponse<CompanyResponseDTO> getCompany(@CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         CompanyResponseDTO company = companyService.getCompanyById(companyId);
         return ApiResponse.success(company, "Company retrieved successfully");
     }
 
-    // ==================== EMPLOYEE MANAGEMENT ====================
+    // ==================== EMPLOYEE & SUB-ADMIN MANAGEMENT ====================
 
     @PostMapping("/employees")
     public ApiResponse<EmployeeResponseDTO> createEmployee(
             @CurrentUser User admin,
             @Valid @RequestBody EmployeeDTO employeeDTO) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
+        if (employeeDTO.getRole() == UserRole.SUB_ADMIN) {
+            if (!admin.isCompanyAdmin()) {
+                throw new org.springframework.security.access.AccessDeniedException("Only primary Company Admin can create Sub-Admins");
+            }
+            EmployeeResponseDTO subAdmin = employeeService.createSubAdmin(companyId, employeeDTO);
+            return ApiResponse.success(subAdmin, "Sub-admin created successfully");
+        }
         EmployeeResponseDTO employee = employeeService.createEmployee(companyId, employeeDTO);
         return ApiResponse.success(employee, "Employee created successfully");
     }
@@ -75,7 +98,7 @@ public class CompanyAdminController {
             @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(required = false) String search) {
 
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         Sort sort = sortDir.equalsIgnoreCase("asc") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
         Pageable pageable = PageRequest.of(page, size, sort);
         Page<EmployeeResponseDTO> employees = employeeService.getEmployeesByCompany(companyId, search, pageable);
@@ -90,22 +113,52 @@ public class CompanyAdminController {
 
     @PutMapping("/employees/{employeeId}")
     public ApiResponse<EmployeeResponseDTO> updateEmployee(
+            @CurrentUser User currentUser,
             @PathVariable Long employeeId,
             @Valid @RequestBody EmployeeDTO employeeDTO) {
+        User target = userRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + employeeId));
+        if (target.getRole() == UserRole.SUB_ADMIN) {
+            if (!currentUser.isCompanyAdmin()) {
+                throw new org.springframework.security.access.AccessDeniedException("Only primary Company Admin can update Sub-Admins");
+            }
+            EmployeeResponseDTO subAdmin = employeeService.updateSubAdmin(employeeId, employeeDTO);
+            return ApiResponse.success(subAdmin, "Sub-admin updated successfully");
+        }
         EmployeeResponseDTO employee = employeeService.updateEmployee(employeeId, employeeDTO);
         return ApiResponse.success(employee, "Employee updated successfully");
     }
 
     @PatchMapping("/employees/{employeeId}/status")
     public ApiResponse<EmployeeResponseDTO> updateEmployeeStatus(
+            @CurrentUser User currentUser,
             @PathVariable Long employeeId,
             @RequestParam UserStatus status) {
+        User target = userRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + employeeId));
+        if (target.getRole() == UserRole.SUB_ADMIN) {
+            if (!currentUser.isCompanyAdmin()) {
+                throw new org.springframework.security.access.AccessDeniedException("Only primary Company Admin can change Sub-Admin status");
+            }
+            target.setStatus(status);
+            User saved = userRepository.save(target);
+            return ApiResponse.success(employeeService.convertToDTO(saved), "Sub-admin status updated successfully");
+        }
         EmployeeResponseDTO employee = employeeService.updateEmployeeStatus(employeeId, status);
         return ApiResponse.success(employee, "Employee status updated successfully");
     }
 
     @DeleteMapping("/employees/{employeeId}")
-    public ApiResponse<Void> deleteEmployee(@PathVariable Long employeeId) {
+    public ApiResponse<Void> deleteEmployee(@CurrentUser User currentUser, @PathVariable Long employeeId) {
+        User target = userRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + employeeId));
+        if (target.getRole() == UserRole.SUB_ADMIN) {
+            if (!currentUser.isCompanyAdmin()) {
+                throw new org.springframework.security.access.AccessDeniedException("Only primary Company Admin can delete Sub-Admins");
+            }
+            employeeService.deleteSubAdmin(employeeId);
+            return ApiResponse.success("Sub-admin deleted successfully");
+        }
         employeeService.deleteEmployee(employeeId);
         return ApiResponse.success("Employee deleted successfully");
     }
@@ -116,33 +169,51 @@ public class CompanyAdminController {
         return ApiResponse.success("Password reset successfully. New credentials sent to email.");
     }
 
-    // ==================== SUB-ADMIN MANAGEMENT ====================
+    // ==================== SUB-ADMIN MANAGEMENT (Company Admin Only) ====================
 
     @PostMapping("/sub-admins")
+    @PreAuthorize("hasRole('COMPANY_ADMIN')")
     public ApiResponse<EmployeeResponseDTO> createSubAdmin(
             @CurrentUser User admin,
             @Valid @RequestBody EmployeeDTO employeeDTO) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         EmployeeResponseDTO subAdmin = employeeService.createSubAdmin(companyId, employeeDTO);
         return ApiResponse.success(subAdmin, "Sub-admin created successfully");
     }
 
     @GetMapping("/sub-admins")
+    @PreAuthorize("hasRole('COMPANY_ADMIN')")
     public ApiResponse<Page<EmployeeResponseDTO>> getSubAdmins(
             @CurrentUser User admin,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<EmployeeResponseDTO> subAdmins = employeeService.getSubAdminsByCompany(companyId, pageable);
         return ApiResponse.success(subAdmins, "Sub-admins retrieved successfully");
+    }
+
+    @PutMapping("/sub-admins/{subAdminId}")
+    @PreAuthorize("hasRole('COMPANY_ADMIN')")
+    public ApiResponse<EmployeeResponseDTO> updateSubAdmin(
+            @PathVariable Long subAdminId,
+            @Valid @RequestBody EmployeeDTO employeeDTO) {
+        EmployeeResponseDTO subAdmin = employeeService.updateSubAdmin(subAdminId, employeeDTO);
+        return ApiResponse.success(subAdmin, "Sub-admin updated successfully");
+    }
+
+    @DeleteMapping("/sub-admins/{subAdminId}")
+    @PreAuthorize("hasRole('COMPANY_ADMIN')")
+    public ApiResponse<Void> deleteSubAdmin(@PathVariable Long subAdminId) {
+        employeeService.deleteSubAdmin(subAdminId);
+        return ApiResponse.success("Sub-admin deleted successfully");
     }
 
     // ==================== COMPLIANCE ASSIGNMENT (Company View) ====================
 
     @GetMapping("/compliance/assigned")
     public ApiResponse<List<ComplianceConfigDTO>> getAssignedCompliances(@CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         Company company = companyService.getCompanyEntityById(companyId);
         String companyName = company.getName();
 
@@ -319,7 +390,7 @@ public class CompanyAdminController {
 
     @GetMapping("/compliance/parents")
     public ApiResponse<List<ParentComplianceDetailsDTO>> getCompanyParentCompliances(@CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         List<CompanyCompliance> allCCs = companyComplianceRepository
                 .findByCompanyIdAndIsActiveTrueAndDeletedFalse(companyId);
 
@@ -403,8 +474,12 @@ public class CompanyAdminController {
             dto.setAssignedAt(cc.getCreatedAt());
             dto.setTotalSubCompliances(subCCs != null ? subCCs.size() : 0);
 
-            Boolean editable = template.getEditableForCompanies();
+            Boolean editable = template.isEditable();
+            Boolean semiEditable = template.isSemiEditable();
             dto.setCanManage(editable != null && editable);
+            dto.setEditableForCompanies(editable);
+            dto.setIsSemiEditable(semiEditable);
+            dto.setTemplateType(template.resolveTemplateType());
             dto.setIsCompanySpecific(template.getIsCompanySpecific());
             dto.setCompanyId(companyId);
 
@@ -420,7 +495,7 @@ public class CompanyAdminController {
     public ApiResponse<Void> deleteCustomCompliance(
             @PathVariable Long templateId,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.deleteCustomTemplateForCompany(templateId, companyId, admin.getId());
         return ApiResponse.success("Custom compliance deleted successfully");
     }
@@ -442,7 +517,7 @@ public class CompanyAdminController {
             @Valid @RequestBody ComplianceSubTemplateDTO dto,
             @CurrentUser User admin) {
         log.info("Company Admin adding sub‑compliance to editable parent: {}", parentId);
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         ComplianceSubTemplateDTO created = complianceService.createCompanySubTemplate(parentId, companyId, dto, admin.getId());
         return ApiResponse.success(created, "Sub‑compliance added successfully");
     }
@@ -481,7 +556,7 @@ public class CompanyAdminController {
             @PathVariable Long configId,
             @Valid @RequestBody ComplianceConfigDTO dto,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         ComplianceConfigDTO updated = complianceService.updateComplianceConfig(configId, companyId, dto, admin.getId());
         return ApiResponse.success(updated, "Configuration updated successfully");
     }
@@ -492,7 +567,7 @@ public class CompanyAdminController {
     public ApiResponse<ComplianceConfigDTO> configureSubCompliance(
             @Valid @RequestBody ComplianceConfigDTO dto,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         Long subTemplateId = dto.getSubTemplateId();
         if (subTemplateId == null) {
             return ApiResponse.error("Sub-template ID is required", 400);
@@ -507,7 +582,7 @@ public class CompanyAdminController {
             @PathVariable Long configId,
             @Valid @RequestBody ComplianceConfigDTO dto,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         ComplianceConfigDTO updated = complianceService.updateComplianceConfig(configId, companyId, dto, admin.getId());
         return ApiResponse.success(updated, "Configuration updated successfully");
     }
@@ -520,7 +595,7 @@ public class CompanyAdminController {
             @CurrentUser User admin) {
         // For company admin, we want to show sub‑compliances specific to their company
         // if the parent is editable, otherwise global ones.
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         List<ComplianceSubTemplateDTO> subTemplates = complianceService.getCompanySubTemplates(parentId, companyId);
         return ApiResponse.success(subTemplates, "Sub‑compliances retrieved successfully");
     }
@@ -539,7 +614,7 @@ public class CompanyAdminController {
             @PathVariable Long id,
             @Valid @RequestBody ComplianceSubTemplateDTO dto,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         ComplianceSubTemplateDTO updated = complianceService.updateCompanySubTemplate(id, companyId, dto, admin.getId());
         return ApiResponse.success(updated, "Sub-compliance updated successfully");
     }
@@ -548,7 +623,7 @@ public class CompanyAdminController {
     public ApiResponse<Void> deleteSubCompliance(
             @PathVariable Long id,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.deleteCompanySubTemplatePermanently(id, companyId);
         return ApiResponse.success("Sub-compliance deleted successfully");
     }
@@ -559,7 +634,7 @@ public class CompanyAdminController {
     public ApiResponse<ParentComplianceDetailsDTO> getParentComplianceProgress(
             @PathVariable Long parentId,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         ParentComplianceDetailsDTO details = complianceService.getParentComplianceDetails(parentId, companyId);
         return ApiResponse.success(details, "Parent compliance progress retrieved successfully");
     }
@@ -568,7 +643,7 @@ public class CompanyAdminController {
     public ApiResponse<ParentComplianceDetailsDTO> getParentComplianceDetails(
             @PathVariable Long parentId,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         ParentComplianceDetailsDTO details = complianceService.getParentComplianceDetails(parentId, companyId);
         return ApiResponse.success(details, "Parent compliance details retrieved successfully");
     }
@@ -577,7 +652,7 @@ public class CompanyAdminController {
     public ApiResponse<List<ParentComplianceDetailsDTO.SubComplianceInfoDTO>> getSubCompliancesByParent(
             @PathVariable Long parentId,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         ParentComplianceDetailsDTO details = complianceService.getParentComplianceDetails(parentId, companyId);
         return ApiResponse.success(details.getSubCompliances(), "Sub-compliances retrieved successfully");
     }
@@ -587,7 +662,7 @@ public class CompanyAdminController {
             @PathVariable Long parentId,
             @RequestBody List<Long> employeeIds,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.assignParentWithSubCompliances(parentId, companyId, employeeIds, admin.getId());
         return ApiResponse.success("Compliance assigned to " + employeeIds.size() + " employees with all sub-compliances");
     }
@@ -598,7 +673,7 @@ public class CompanyAdminController {
     public ApiResponse<SubComplianceDetailsDTO> getSubComplianceDetails(
             @PathVariable Long subComplianceId,
             @CurrentUser User admin) {
-        SubComplianceDetailsDTO details = complianceService.getSubComplianceDetails(subComplianceId, admin.getCompany().getId());
+        SubComplianceDetailsDTO details = complianceService.getSubComplianceDetails(subComplianceId, getCompanyId(admin));
         return ApiResponse.success(details, "Sub-compliance details retrieved successfully");
     }
 
@@ -606,7 +681,7 @@ public class CompanyAdminController {
     public ApiResponse<List<SubmissionHistoryDTO>> getSubmissionHistory(
             @PathVariable Long subComplianceId,
             @CurrentUser User admin) {
-        List<SubmissionHistoryDTO> history = complianceService.getSubmissionHistory(subComplianceId, admin.getCompany().getId());
+        List<SubmissionHistoryDTO> history = complianceService.getSubmissionHistory(subComplianceId, getCompanyId(admin));
         return ApiResponse.success(history, "Submission history retrieved successfully");
     }
 
@@ -619,7 +694,7 @@ public class CompanyAdminController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long categoryId) {
 
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         List<CalendarEventDTO> events = complianceService.getCalendarEvents(companyId, startDate, endDate, employeeId, status, categoryId);
         return ApiResponse.success(events, "Calendar events retrieved successfully");
     }
@@ -676,7 +751,7 @@ public class CompanyAdminController {
             @RequestParam Long configId,
             @RequestBody List<Long> employeeIds,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.assignToEmployees(configId, employeeIds, companyId, admin.getId());
         return ApiResponse.success("Compliance assigned to " + employeeIds.size() + " employees");
     }
@@ -685,7 +760,7 @@ public class CompanyAdminController {
     public ApiResponse<Set<Long>> getAssignedParentComplianceIds(
             @PathVariable Long employeeId,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         Set<Long> parentIds = complianceService.getAssignedParentComplianceIdsForEmployee(employeeId, companyId);
         return ApiResponse.success(parentIds, "Assigned parent compliance IDs retrieved successfully");
     }
@@ -695,7 +770,7 @@ public class CompanyAdminController {
             @PathVariable Long employeeId,
             @RequestBody List<Long> parentComplianceIds,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.syncParentCompliancesForEmployee(employeeId, parentComplianceIds, companyId, admin.getId());
         return ApiResponse.success("Compliance assignments updated successfully");
     }
@@ -705,7 +780,7 @@ public class CompanyAdminController {
             @PathVariable Long employeeId,
             @PathVariable Long complianceId,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.removeParentComplianceFromEmployee(complianceId, employeeId, companyId, admin.getId());
         return ApiResponse.success("Compliance removed from employee successfully");
     }
@@ -715,7 +790,7 @@ public class CompanyAdminController {
             @RequestParam List<Long> parentComplianceIds,
             @RequestBody List<Long> employeeIds,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.assignParentCompliancesToMultipleEmployees(parentComplianceIds, employeeIds, companyId, admin.getId());
         return ApiResponse.success("Assigned " + parentComplianceIds.size() + " compliances to " + employeeIds.size() + " employees");
     }
@@ -724,7 +799,7 @@ public class CompanyAdminController {
     public ApiResponse<Set<Long>> getAssignedEmployeeIdsForParent(
             @PathVariable Long parentId,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         Set<Long> empIds = complianceService.getAssignedEmployeeIdsForParentCompliance(parentId, companyId);
         return ApiResponse.success(empIds, "Assigned employee IDs retrieved successfully");
     }
@@ -734,7 +809,7 @@ public class CompanyAdminController {
             @PathVariable Long parentId,
             @RequestBody List<Long> employeeIds,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.assignParentWithSubCompliances(parentId, companyId, employeeIds, admin.getId());
         return ApiResponse.success("Parent compliance assigned to " + employeeIds.size() + " employees with all sub-compliances");
     }
@@ -744,7 +819,7 @@ public class CompanyAdminController {
             @PathVariable Long parentId,
             @RequestBody List<Long> employeeIds,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.syncEmployeesForParentCompliance(parentId, employeeIds, companyId, admin.getId());
         return ApiResponse.success("Employee assignments updated successfully");
     }
@@ -754,7 +829,7 @@ public class CompanyAdminController {
             @PathVariable Long parentId,
             @PathVariable Long employeeId,
             @CurrentUser User admin) {
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         complianceService.removeParentComplianceFromEmployee(parentId, employeeId, companyId, admin.getId());
         return ApiResponse.success("Employee removed from compliance successfully");
     }
@@ -767,7 +842,7 @@ public class CompanyAdminController {
             @RequestParam(required = false) Long employeeId,
             @RequestParam(required = false) String status) {
 
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         Pageable pageable = PageRequest.of(page, size, Sort.by("dueDate").ascending());
         Page<EmployeeComplianceDTO> assignments = assignmentService.getCompanyAssignments(
                 companyId, employeeId, status, pageable);
@@ -784,7 +859,7 @@ public class CompanyAdminController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String status) {
 
-        Long companyId = admin.getCompany().getId();
+        Long companyId = getCompanyId(admin);
         Pageable pageable = PageRequest.of(page, size, Sort.by("dueDate").ascending());
 
         EmployeeResponseDTO employee = employeeService.getEmployeeById(employeeId);
@@ -808,7 +883,7 @@ public class CompanyAdminController {
 
         Pageable pageable = PageRequest.of(page, size, Sort.by("dueDate").ascending());
         Page<EmployeeComplianceDTO> assignments = assignmentService.getCompanyAssignments(
-                admin.getCompany().getId(), employeeId, status, pageable);
+                getCompanyId(admin), employeeId, status, pageable);
         return ApiResponse.success(assignments, "Employee assignments retrieved successfully");
     }
 
@@ -832,8 +907,11 @@ public class CompanyAdminController {
         dto.setIsSuperAdminConfig(cc.getIsSuperAdminConfig());
         dto.setIsActive(cc.getIsActive());
 
-        Boolean editable = cc.getTemplate() != null && Boolean.TRUE.equals(cc.getTemplate().getEditableForCompanies());
+        Boolean editable = cc.getTemplate() != null && cc.getTemplate().isEditable();
+        Boolean semiEditable = cc.getTemplate() != null && cc.getTemplate().isSemiEditable();
         dto.setEditableForCompanies(editable);
+        dto.setIsSemiEditable(semiEditable);
+        dto.setTemplateType(cc.getTemplate() != null ? cc.getTemplate().resolveTemplateType() : null);
         dto.setCanManage(editable);
 
         dto.setReminderDaysBefore(null);

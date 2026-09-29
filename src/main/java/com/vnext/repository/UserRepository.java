@@ -44,6 +44,11 @@ public interface UserRepository extends JpaRepository<User, Long> {
                                           @Param("role") UserRole role,
                                           @Param("status") UserStatus status);
 
+    @Query("SELECT COUNT(u) FROM User u WHERE u.company.id = :companyId AND u.role IN :roles AND u.status = :status AND u.deleted = false")
+    long countByCompanyIdAndRoleInAndStatus(@Param("companyId") Long companyId,
+                                            @Param("roles") List<UserRole> roles,
+                                            @Param("status") UserStatus status);
+
     @Query("SELECT u FROM User u WHERE u.company.id = :companyId " +
             "AND u.role = :role AND u.deleted = false " +
             "AND (:search IS NULL OR LOWER(u.firstName) LIKE LOWER(CONCAT('%', :search, '%')) " +
@@ -58,8 +63,24 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
 
 
+    Page<User> findByCompanyIdAndRoleInAndDeletedFalse(Long companyId, List<UserRole> roles, Pageable pageable);
+
+    @Query("SELECT u FROM User u WHERE u.company.id = :companyId " +
+            "AND u.role IN :roles AND u.deleted = false " +
+            "AND (:search IS NULL OR LOWER(u.firstName) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(u.lastName)  LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(u.email)     LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(u.employeeCode) LIKE LOWER(CONCAT('%', :search, '%')))")
+    Page<User> searchByCompanyAndRoleIn(@Param("companyId") Long companyId,
+                                        @Param("roles") List<UserRole> roles,
+                                        @Param("search") String search,
+                                        Pageable pageable);
+
     @Query("SELECT u FROM User u WHERE u.role IN :roles AND u.deleted = false")
     List<User> findAllByRoleInAndDeletedFalse(@Param("roles") List<UserRole> roles);
+
+    @Query("SELECT u FROM User u WHERE u.company.id = :companyId AND u.role IN :roles AND u.deleted = false")
+    List<User> findByCompanyIdAndRoleInAndDeletedFalse(@Param("companyId") Long companyId, @Param("roles") List<UserRole> roles);
 
     @Query("SELECT u FROM User u WHERE u.company.id = :companyId AND u.deleted = false")
     List<User> findAllByCompanyIdAndDeletedFalse(@Param("companyId") Long companyId);

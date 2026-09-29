@@ -676,7 +676,7 @@ public class AssignmentService {
             dto.setCompletedBy(compBy);
             if (compBy != null) {
                 userRepository.findById(compBy).ifPresent(u -> {
-                    String roleLabel = u.getRole() == UserRole.COMPANY_ADMIN ? "Company Admin" : (u.getRole() == UserRole.SUPER_ADMIN ? "SuperAdmin" : "Employee");
+                    String roleLabel = u.getRole() == UserRole.COMPANY_ADMIN ? "Company Admin" : (u.getRole() == UserRole.SUB_ADMIN ? "Sub-Admin" : (u.getRole() == UserRole.SUPER_ADMIN ? "SuperAdmin" : "Employee"));
                     dto.setCompletedByName(u.getFullName() != null ? u.getFullName() : (u.getFirstName() + " " + u.getLastName()));
                     dto.setCompletedByRole(roleLabel);
                 });

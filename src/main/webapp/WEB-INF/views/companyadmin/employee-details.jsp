@@ -1205,7 +1205,7 @@
                     </div>
                 </div>
                 <div class="emp-actions">
-                    <button onclick="openAssignCompliancesModalForThisEmployee()" class="btn btn-primary">
+                    <button id="topAssignBtn" onclick="openAssignCompliancesModalForThisEmployee()" class="btn btn-primary">
                         <i class="fas fa-plus-circle"></i> Assign Compliances
                     </button>
                     <a href="#" id="editLink" class="btn btn-ghost">
@@ -1219,24 +1219,24 @@
             </div>
 
             <!-- ==================== COMPLIANCE SECTION ==================== -->
-            <div class="card compliance-section" style="margin-bottom:20px;">
+            <div class="card compliance-section" id="complianceSectionCard" style="margin-bottom:20px;">
                 <div class="section-header">
                     <div>
-                        <div class="title"><i class="fas fa-tasks"></i>Assigned Compliances</div>
-                        <div class="subtitle">Compliance categories assigned to this employee</div>
+                        <div class="title" id="complianceSectionTitle"><i class="fas fa-tasks"></i>Assigned Compliances</div>
+                        <div class="subtitle" id="complianceSectionSubtitle">Compliance categories assigned to this employee</div>
                     </div>
                     <div style="display:flex;gap:8px;">
-                        <button onclick="openAssignCompliancesModalForThisEmployee()" class="btn btn-primary" style="padding:5px 14px;">
+                        <button id="sectionAssignBtn" onclick="openAssignCompliancesModalForThisEmployee()" class="btn btn-primary" style="padding:5px 14px;">
                             <i class="fas fa-plus-circle"></i> Assign Compliances
                         </button>
-                        <button onclick="refreshCompliances()" class="btn btn-ghost" style="padding:5px 12px;">
+                        <button id="sectionRefreshBtn" onclick="refreshCompliances()" class="btn btn-ghost" style="padding:5px 12px;">
                             <i class="fas fa-sync-alt"></i> Refresh
                         </button>
                     </div>
                 </div>
 
                 <!-- Compliance Stats -->
-                <div class="compliance-stats">
+                <div class="compliance-stats" id="complianceStatsBar">
                     <span class="badge badge-pending" id="pendingCount">0 Pending</span>
                     <span class="badge badge-info" id="inProgressCount">0 In Progress</span>
                     <span class="badge badge-success" id="completedCount">0 Completed</span>
@@ -1244,7 +1244,7 @@
                 </div>
 
                 <!-- Filter -->
-                <div class="compliance-filter">
+                <div class="compliance-filter" id="complianceFilterBar">
                     <label class="form-label">Filter by Status:</label>
                     <select id="complianceStatusFilter" class="form-input">
                         <option value="">All Status</option>
@@ -1550,13 +1550,22 @@
         var fullName = e.fullName || e.firstName + ' ' + e.lastName;
         var initials = ((e.firstName || '')[0] || '') + ((e.lastName || '')[0] || '');
 
+        var isSubAdmin = (e.role === 'SUB_ADMIN');
+
         // Header
         document.getElementById('breadcrumbName').textContent = fullName;
         document.getElementById('empName').textContent = fullName;
         document.getElementById('empEmail').textContent = e.email;
         document.getElementById('empAvatar').textContent = initials || '?';
+        var roleBadge = isSubAdmin ? ' <span class="badge" style="background:rgba(99,102,241,0.12);color:#6366f1;"><i class="fas fa-user-shield"></i> Sub-Admin</span>' : '';
         document.getElementById('empCodeBadge').innerHTML =
-            '<span class="badge badge-info"><i class="fas fa-id-card"></i> ' + (e.employeeCode || 'No Code Assigned') + '</span>';
+            '<span class="badge badge-info"><i class="fas fa-id-card"></i> ' + (e.employeeCode || 'No Code Assigned') + '</span>' + roleBadge;
+
+        // Toggle Assign Buttons for Sub-Admin
+        var topAssignBtn = document.getElementById('topAssignBtn');
+        if (topAssignBtn) topAssignBtn.style.display = isSubAdmin ? 'none' : 'inline-flex';
+        var sectionAssignBtn = document.getElementById('sectionAssignBtn');
+        if (sectionAssignBtn) sectionAssignBtn.style.display = isSubAdmin ? 'none' : 'inline-flex';
 
         // Edit link
         var editLink = document.getElementById('editLink');
@@ -1605,6 +1614,26 @@
 
     // ==================== LOAD EMPLOYEE COMPLIANCES ====================
     async function loadEmployeeCompliances() {
+        if (employeeData && employeeData.role === 'SUB_ADMIN') {
+            document.getElementById('complianceSectionSubtitle').textContent = 'Administrative visibility across all compliances';
+            document.getElementById('complianceStatsBar').style.display = 'none';
+            document.getElementById('complianceFilterBar').style.display = 'none';
+            document.getElementById('compliancesList').innerHTML =
+                '<div style="text-align:center;padding:36px 20px;background:rgba(99,102,241,0.04);border-radius:14px;border:1px dashed rgba(99,102,241,0.3);margin:10px 0;">' +
+                    '<div style="width:52px;height:52px;border-radius:50%;background:rgba(99,102,241,0.12);color:#6366f1;display:inline-flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:12px;">' +
+                        '<i class="fas fa-shield-alt"></i>' +
+                    '</div>' +
+                    '<h4 style="font-size:16px;font-weight:700;color:var(--gray-900);margin:0 0 8px 0;">Full Administrative Compliance Access</h4>' +
+                    '<p style="font-size:13px;color:var(--gray-600);max-width:500px;margin:0 auto 16px auto;line-height:1.5;">' +
+                        'Sub-Admins have complete administrative permissions to view, configure, and monitor all company compliances. Individual task assignments are reserved for standard employees.' +
+                    '</p>' +
+                    '<a href="' + contextPath + '/company-admin/compliance/list" class="btn btn-primary" style="font-size:12px;padding:6px 14px;">' +
+                        '<i class="fas fa-list-check" style="margin-right:6px;"></i> View Company Compliances' +
+                    '</a>' +
+                '</div>';
+            return;
+        }
+
         var status = document.getElementById('complianceStatusFilter').value;
         var url = '/api/company-admin/compliance/employee/' + EMP_ID + '/compliances?page=' + currentCompliancePage + '&size=' + compliancePageSize;
         if (status) url += '&status=' + status;
@@ -1814,9 +1843,12 @@
             var isAssigned = assignedSet.has(item.id) || (item.templateId && assignedSet.has(item.templateId));
             if (isAssigned) checkedCount++;
 
-            var typeBadge = item.canManage === true
-                ? '<span style="background:rgba(245,158,11,0.12);color:var(--warning);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-edit"></i> Editable</span>'
-                : '<span style="background:rgba(79,70,229,0.1);color:var(--primary);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-lock"></i> Admin Managed</span>';
+            var isSemi = item.templateType === 'SEMI_EDITABLE' || item.isSemiEditable === true;
+            var typeBadge = isSemi
+                ? '<span style="background:rgba(139,92,246,0.15);color:#7c3aed;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-sliders-h"></i> Semi-Editable</span>'
+                : (item.canManage === true
+                    ? '<span style="background:rgba(245,158,11,0.12);color:var(--warning);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-edit"></i> Editable</span>'
+                    : '<span style="background:rgba(79,70,229,0.1);color:var(--primary);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-lock"></i> Admin Managed</span>');
 
             var subBadge = subsCount > 0 
                 ? '<span style="background:rgba(30,58,138,0.08);color:var(--primary);padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;"><i class="fas fa-list"></i> ' + subsCount + ' Sub-Compliances</span>'

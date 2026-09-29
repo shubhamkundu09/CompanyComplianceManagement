@@ -2402,7 +2402,8 @@
                        }
                    }
                }
-               var isCanManage = targetEntry.canManage === true || targetEntry.editableForCompanies === true || (foundParentEntry && (foundParentEntry.canManage === true || foundParentEntry.editableForCompanies === true));
+               var isSemiEditable = targetEntry.semiEditable === true || targetEntry.isSemiEditable === true || targetEntry.templateType === 'SEMI_EDITABLE' || (foundParentEntry && (foundParentEntry.semiEditable === true || foundParentEntry.isSemiEditable === true || foundParentEntry.templateType === 'SEMI_EDITABLE'));
+               var isCanManage = !isSemiEditable && (targetEntry.canManage === true || targetEntry.editableForCompanies === true || (foundParentEntry && (foundParentEntry.canManage === true || foundParentEntry.editableForCompanies === true)));
 
                parentData = {
                    templateName: targetEntry.templateName || "Compliance",
@@ -2411,6 +2412,8 @@
                    isCustom: targetEntry.isSuperAdminConfig === false,
                    canManage: isCanManage,
                    editableForCompanies: isCanManage,
+                   isSemiEditable: isSemiEditable,
+                   templateType: targetEntry.templateType || (foundParentEntry ? foundParentEntry.templateType : (isSemiEditable ? 'SEMI_EDITABLE' : (isCanManage ? 'EDITABLE' : 'NON_EDITABLE'))),
                    subCompliances: subCompliances,
                    totalSubCompliances: subCompliances.length,
                    configuredSubCompliances: subCompliances.filter(function (s) { return s.configured === true; }).length,
@@ -2430,7 +2433,7 @@
                renderHeader();
                renderSubCompliances();
 
-               if (parentData.hasSubCompliances || parentData.canManage) {
+               if (parentData.hasSubCompliances || parentData.canManage || parentData.isSemiEditable) {
                    document.getElementById('parentConfigSection').style.display = 'none';
                    document.getElementById('subSection').style.display = 'block';
                    document.getElementById('subCountTab').textContent = subCompliances.length;
@@ -2498,10 +2501,12 @@
             '<i class="fas ' + iconClass + '"></i>';
 
         var statusInfo = getStatusInfo(p.overallStatus);
-        var canManage = p.canManage === true;
-        var typeLabel = canManage ? "Editable Category" : "Non-Editable (Admin Managed)";
-        var typeIcon = canManage ? "fa-edit" : "fa-lock";
-        var typeCls = canManage ? "badge-warning" : "badge-primary";
+        var isSemi = p.isSemiEditable === true || p.templateType === 'SEMI_EDITABLE';
+        var canManage = p.canManage === true && !isSemi;
+        var typeLabel = isSemi ? "Semi-Editable (Company Configured)" : (canManage ? "Editable Category" : "Non-Editable (Admin Managed)");
+        var typeIcon = isSemi ? "fa-sliders-h" : (canManage ? "fa-edit" : "fa-lock");
+        var typeCls = isSemi ? "badge-info" : (canManage ? "badge-warning" : "badge-primary");
+        var typeStyle = isSemi ? ' style="background:rgba(139,92,246,0.15);color:#7c3aed;border:1px solid rgba(139,92,246,0.3);"' : '';
 
         document.getElementById("heroBadges").innerHTML =
             '<span class="badge ' +
@@ -2513,7 +2518,7 @@
             "</span>" +
             '<span class="badge ' +
             typeCls +
-            '"><i class="fas ' +
+            '"' + typeStyle + '><i class="fas ' +
             typeIcon +
             '"></i> ' +
             typeLabel +
@@ -2774,23 +2779,22 @@
                             ",'" +
                             escapeHtml(s.subTemplateName) +
                             '\')" class="btn btn-ghost btn-sm" style="color:var(--primary);" title="Edit Completion Details"><i class="fas fa-edit"></i> Edit</button>')
-                    : (parentData && parentData.canManage
+                    : ((parentData && (parentData.canManage || parentData.isSemiEditable))
                         ? '<button onclick="event.stopPropagation();openConfigModalForSub(' +
                             s.subTemplateId +
                             ')" class="btn btn-primary btn-sm" title="Configure Sub-Compliance"><i class="fas fa-cog"></i> Configure</button>'
                         : '<button class="btn btn-ghost btn-sm" disabled style="opacity:0.4;cursor:not-allowed;" title="Not Configured"><i class="fas fa-lock"></i> Not Configured</button>')) +
-                // Show Edit/Delete ONLY for sub-compliances under Editable categories (canManage = true)
-                (parentData && parentData.canManage
-                    ? (isConfigured
-                        ? ' <button onclick="event.stopPropagation();openConfigModalForSub(' +
-                            s.subTemplateId +
-                            ')" class="btn btn-ghost btn-sm" title="Edit Configuration"><i class="fas fa-cog"></i> Edit Config</button>' +
-                          ' <button onclick="event.stopPropagation();deleteSubCompliance(' +
-                            s.subTemplateId +
-                            ')" class="btn btn-danger btn-sm" title="Delete Sub-Compliance"><i class="fas fa-trash"></i></button>'
-                        : ' <button onclick="event.stopPropagation();deleteSubCompliance(' +
-                            s.subTemplateId +
-                            ')" class="btn btn-danger btn-sm" title="Delete Sub-Compliance"><i class="fas fa-trash"></i></button>')
+                // Show Edit Config for sub-compliances under Semi-Editable or Editable categories
+                ((parentData && (parentData.canManage || parentData.isSemiEditable) && isConfigured)
+                    ? ' <button onclick="event.stopPropagation();openConfigModalForSub(' +
+                        s.subTemplateId +
+                        ')" class="btn btn-ghost btn-sm" title="Edit Configuration"><i class="fas fa-cog"></i> Edit Config</button>'
+                    : '') +
+                // Show Delete ONLY for sub-compliances under custom Editable categories (canManage = true, NOT semi-editable)
+                ((parentData && parentData.canManage && !parentData.isSemiEditable)
+                    ? ' <button onclick="event.stopPropagation();deleteSubCompliance(' +
+                        s.subTemplateId +
+                        ')" class="btn btn-danger btn-sm" title="Delete Sub-Compliance"><i class="fas fa-trash"></i></button>'
                     : '') +
                 "</div>" +
                 "</div>" +

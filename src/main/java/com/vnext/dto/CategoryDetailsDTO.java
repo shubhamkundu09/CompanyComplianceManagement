@@ -10,6 +10,9 @@ public class CategoryDetailsDTO {
     private String name;
     private String description;
     private Boolean isActive;
+    private Boolean editableForCompanies;
+    private Boolean isSemiEditable;
+    private com.vnext.entity.ComplianceTemplateType templateType;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

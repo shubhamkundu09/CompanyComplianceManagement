@@ -22,6 +22,8 @@ public class ComplianceTemplateDTO {
 
     // NEW
     private Boolean editableForCompanies = false;
+    private Boolean isSemiEditable = false;
+    private com.vnext.entity.ComplianceTemplateType templateType;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

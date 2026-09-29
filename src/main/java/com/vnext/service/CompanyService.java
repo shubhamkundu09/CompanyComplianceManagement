@@ -571,8 +571,8 @@ public class CompanyService {
     public void updateEmployeeCount(Long companyId) {
         log.info("Updating employee count for company ID: {}", companyId);
 
-        long actualCount = userRepository.countByCompanyIdAndRoleAndStatus(
-                companyId, UserRole.EMPLOYEE, UserStatus.ACTIVE
+        long actualCount = userRepository.countByCompanyIdAndRoleInAndStatus(
+                companyId, List.of(UserRole.EMPLOYEE, UserRole.SUB_ADMIN), UserStatus.ACTIVE
         );
 
         Company company = getCompanyEntityById(companyId);
@@ -609,8 +609,8 @@ public class CompanyService {
     }
 
     public long getActiveEmployeeCount(Long companyId) {
-        return userRepository.countByCompanyIdAndRoleAndStatus(
-                companyId, UserRole.EMPLOYEE, UserStatus.ACTIVE
+        return userRepository.countByCompanyIdAndRoleInAndStatus(
+                companyId, List.of(UserRole.EMPLOYEE, UserRole.SUB_ADMIN), UserStatus.ACTIVE
         );
     }
 
@@ -625,7 +625,7 @@ public class CompanyService {
 
         if (activeCount >= company.getEmployeeLimit()) {
             throw new BusinessException(
-                    String.format("Employee limit reached. Cannot add more active employees. Limit: %d, Active: %d",
+                    String.format("Employee limit reached. Cannot add more active members. Limit: %d, Active: %d",
                             company.getEmployeeLimit(), activeCount)
             );
         }
@@ -639,7 +639,7 @@ public class CompanyService {
 
         if (activeCount >= company.getEmployeeLimit()) {
             throw new BusinessException(
-                    String.format("Cannot activate employee. Active employee limit reached. Limit: %d, Active: %d",
+                    String.format("Cannot activate member. Active limit reached. Limit: %d, Active: %d",
                             company.getEmployeeLimit(), activeCount)
             );
         }
@@ -651,8 +651,8 @@ public class CompanyService {
     public void updateActiveEmployeeCount(Long companyId) {
         log.info("Updating active employee count for company ID: {}", companyId);
 
-        long activeCount = userRepository.countByCompanyIdAndRoleAndStatus(
-                companyId, UserRole.EMPLOYEE, UserStatus.ACTIVE
+        long activeCount = userRepository.countByCompanyIdAndRoleInAndStatus(
+                companyId, List.of(UserRole.EMPLOYEE, UserRole.SUB_ADMIN), UserStatus.ACTIVE
         );
 
         Company company = getCompanyEntityById(companyId);

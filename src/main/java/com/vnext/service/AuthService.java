@@ -68,6 +68,10 @@ public class AuthService {
             title = "Company Admin Login";
             body = "Company Admin logged in successfully";
             type = NotificationType.COMPANY_ADMIN_LOGIN;
+        } else if (user.isSubAdmin()) {
+            title = "Sub-Admin Login";
+            body = "Sub-Admin logged in successfully";
+            type = NotificationType.COMPANY_ADMIN_LOGIN;
         } else {
             title = "Employee Login";
             body = "Employee logged in successfully";

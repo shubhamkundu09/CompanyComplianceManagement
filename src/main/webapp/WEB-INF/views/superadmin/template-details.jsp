@@ -2222,10 +2222,13 @@
                var statusClass = templateData.isActive ? 'badge-active' : 'badge-inactive';
                document.getElementById('statusBadge').innerHTML = '<span class="badge ' + statusClass + '"><i class="fas fa-circle" style="font-size:5px;margin-right:4px;"></i> ' + (templateData.isActive ? 'Active' : 'Inactive') + '</span>';
 
-               var isEditable = templateData.editableForCompanies === true;
-               var typeBadgeHtml = isEditable
-                   ? '<span class="badge badge-warning" style="background:rgba(245,158,11,0.15);color:#d97706;border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
-                   : '<span class="badge badge-primary" style="background:rgba(79,70,229,0.15);color:var(--primary);border:1px solid rgba(79,70,229,0.3);"><i class="fas fa-lock"></i> Non-Editable Category</span>';
+               var isEditable = templateData.templateType === 'EDITABLE' || templateData.editableForCompanies === true;
+               var isSemiEditable = templateData.templateType === 'SEMI_EDITABLE' || templateData.isSemiEditable === true;
+               var typeBadgeHtml = isSemiEditable
+                   ? '<span class="badge" style="background:rgba(139,92,246,0.15);color:#7c3aed;border:1px solid rgba(139,92,246,0.3);"><i class="fas fa-sliders-h"></i> Semi-Editable Category</span>'
+                   : (isEditable
+                       ? '<span class="badge badge-warning" style="background:rgba(245,158,11,0.15);color:#d97706;border:1px solid rgba(245,158,11,0.3);"><i class="fas fa-edit"></i> Editable Category</span>'
+                       : '<span class="badge badge-primary" style="background:rgba(79,70,229,0.15);color:var(--primary);border:1px solid rgba(79,70,229,0.3);"><i class="fas fa-lock"></i> Non-Editable Category</span>');
                document.getElementById('typeBadge').innerHTML = typeBadgeHtml;
 
                await Promise.all([
@@ -2254,7 +2257,8 @@
   async function loadSubCompliances() {
       console.log('Loading sub-compliances for parent:', TEMPLATE_ID);
 
-      if (templateData && templateData.editableForCompanies === true) {
+      var isFullyEditable = templateData && (templateData.templateType === 'EDITABLE' || (templateData.editableForCompanies === true && templateData.templateType !== 'SEMI_EDITABLE'));
+      if (isFullyEditable) {
           subCompliances = [];
           renderSubCompliances();
           updateUI();
@@ -2297,7 +2301,9 @@
     async function loadParentConfig() {
         console.log('Loading parent config for template:', TEMPLATE_ID);
 
-        if (templateData && templateData.editableForCompanies === true) {
+        var isFullyEditable = templateData && (templateData.templateType === 'EDITABLE' || (templateData.editableForCompanies === true && templateData.templateType !== 'SEMI_EDITABLE'));
+        var isSemi = templateData && (templateData.templateType === 'SEMI_EDITABLE' || templateData.isSemiEditable === true);
+        if (isFullyEditable || isSemi) {
             parentConfig = null;
             document.getElementById('configSection').style.display = 'none';
             document.getElementById('editParentConfigBtn').style.display = 'none';
@@ -2396,7 +2402,8 @@
         var hasSubs = subCompliances.length > 0;
         var hasConfig = parentConfig !== null;
         var hasAssignments = assignedCompanies.length > 0;
-        var isEditable = templateData && templateData.editableForCompanies === true;
+        var isSemiEditable = templateData && (templateData.templateType === 'SEMI_EDITABLE' || templateData.isSemiEditable === true);
+        var isEditable = templateData && (templateData.templateType === 'EDITABLE' || (templateData.editableForCompanies === true && !isSemiEditable));
 
         var addSubBtn = document.getElementById("addSubBtn");
         var configureBtn = document.getElementById("configureParentBtn");
@@ -2421,7 +2428,10 @@
         document.getElementById("subCompliancesCount").textContent = subCompliances.length;
 
         // ---- Config status badge ----
-        if (hasSubs) {
+        if (isSemiEditable) {
+            document.getElementById("configStatusBadge").innerHTML =
+                '<span class="badge" style="background:rgba(139,92,246,0.15);color:#7c3aed;border:1px solid rgba(139,92,246,0.3);"><i class="fas fa-sliders-h"></i> Company Configured</span>';
+        } else if (hasSubs) {
             var anyConfigured = subCompliances.some(function (s) { return s.isConfigured === true; });
             var allConfigured = subCompliances.every(function (s) { return s.isConfigured === true; });
 
@@ -2488,6 +2498,20 @@
                 loadCompanySubCompliancesForEditable();
             }
 
+            return;
+        } else if (isSemiEditable) {
+            // ---- Semi-Editable compliance ----
+            // SuperAdmin creates sub-compliances, but companies configure their schedules
+            addSubBtn.style.display = "inline-flex";
+            configureBtn.style.display = "none";
+            editConfigBtn.style.display = "none";
+            assignBtn.style.display = "none"; // Auto-distributed
+
+            configSection.style.display = "none";
+            subSection.style.display = "block";
+            if (assignedCompaniesSection) assignedCompaniesSection.style.display = "block";
+            if (statsGrid) statsGrid.style.display = "grid";
+            if (editableSubSection) editableSubSection.style.display = "none";
             return;
         } else {
             if (assignedCompaniesSection) assignedCompaniesSection.style.display = "block";
@@ -2698,6 +2722,7 @@
             return a.name.localeCompare(b.name);
         });
 
+        var isSemiEditable = templateData && (templateData.templateType === 'SEMI_EDITABLE' || templateData.isSemiEditable === true);
         var html = "";
         for (var i = 0; i < sortedSubs.length; i++) {
             var s = sortedSubs[i];
@@ -2712,7 +2737,12 @@
 
             // Build config details display
             var configHtml = "";
-            if (isConfigured && configDetails) {
+            if (isSemiEditable) {
+                configHtml =
+                    '<div style="margin-top:6px;font-size:11px;color:#7c3aed;">' +
+                    '<i class="fas fa-sliders-h"></i> Schedules & due dates are configured individually by companies.' +
+                    "</div>";
+            } else if (isConfigured && configDetails) {
                 var freq = getFrequencyLabel(configDetails.frequency);
 
                 // Due date display
@@ -2769,6 +2799,17 @@
                     "</div>";
             }
 
+            var configBadgeHtml = isSemiEditable
+                ? '<span class="badge" style="background:rgba(139,92,246,0.15);color:#7c3aed;font-size:10px;"><i class="fas fa-sliders-h"></i> Company Configured</span>'
+                : '<span class="badge ' + configClass + '" style="font-size:10px;">' + configText + "</span>";
+
+            var configureBtnHtml = "";
+            if (!isSemiEditable) {
+                configureBtnHtml = isConfigured ?
+                    '<button onclick="editConfig(' + s.id + ')" class="btn btn-ghost btn-sm" title="Edit Configuration"><i class="fas fa-edit"></i></button>' :
+                    '<button onclick="openConfigModal(' + s.id + ', \'sub\')" class="btn btn-success btn-sm" title="Configure"><i class="fas fa-cog"></i></button>';
+            }
+
             html +=
                 '<div class="sub-card">' +
                 '<div class="sub-left" onclick="editSubCompliance(' + s.id + ')">' +
@@ -2783,10 +2824,8 @@
                 "</div>" +
                 '<div class="sub-right">' +
                 '<span class="badge ' + statusClass + '" style="font-size:10px;">' + statusText + "</span>" +
-                '<span class="badge ' + configClass + '" style="font-size:10px;">' + configText + "</span>" +
-                (isConfigured ?
-                    '<button onclick="editConfig(' + s.id + ')" class="btn btn-ghost btn-sm" title="Edit Configuration"><i class="fas fa-edit"></i></button>' :
-                    '<button onclick="openConfigModal(' + s.id + ', \'sub\')" class="btn btn-success btn-sm" title="Configure"><i class="fas fa-cog"></i></button>') +
+                configBadgeHtml +
+                configureBtnHtml +
                 '<button onclick="toggleSubStatus(' + s.id + ', ' + isActive + ')" class="btn ' + (isActive ? "btn-warning" : "btn-success") + ' btn-sm" title="Toggle Status"><i class="fas ' + (isActive ? "fa-pause" : "fa-play") + '"></i></button>' +
                 '<button onclick="openDeleteSubModal(' + s.id + ", '" + escapeHtml(s.name) + "', " + isConfigured + ')" class="btn btn-danger btn-sm" title="Delete"><i class="fas fa-trash"></i></button>' +
                 "</div>" +
