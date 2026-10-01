@@ -237,7 +237,7 @@ public class EmployeeService {
         // Update company active employee count
         companyService.updateActiveEmployeeCount(companyId);
 
-        // Send credentials email
+        // Send credentials email to Employee
         try {
             emailService.sendCredentialsEmail(
                     employeeDTO.getEmail(),
@@ -248,6 +248,42 @@ public class EmployeeService {
             log.info("Credentials email sent successfully to: {}", employeeDTO.getEmail());
         } catch (Exception e) {
             log.error("Failed to send email to: {}", employeeDTO.getEmail(), e);
+        }
+
+        // Send confirmation email to Company Admin
+        try {
+            if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getEmail() != null) {
+                emailService.sendEmployeeCreatedConfirmationToCompanyAdmin(
+                        company.getCompanyAdmin().getEmail(),
+                        company.getCompanyAdmin().getFullName(),
+                        company.getName(),
+                        savedEmployee.getFullName(),
+                        savedEmployee.getEmail(),
+                        employeeCode
+                );
+            }
+        } catch (Exception e) {
+            log.error("Failed to send employee created confirmation email to Company Admin: {}", e.getMessage());
+        }
+
+        // Send alert email to SuperAdmins
+        try {
+            List<User> superAdmins = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN);
+            for (User sa : superAdmins) {
+                if (sa.getEmail() != null && !sa.getEmail().trim().isEmpty()) {
+                    emailService.sendEmployeeCreatedAlertToSuperAdmin(
+                            sa.getEmail(),
+                            company.getName(),
+                            savedEmployee.getFullName(),
+                            savedEmployee.getEmail(),
+                            savedEmployee.getDesignation(),
+                            savedEmployee.getDepartment(),
+                            employeeCode
+                    );
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to send employee created alert email to SuperAdmins: {}", e.getMessage());
         }
 
         log.info("Employee created successfully with ID: {} and code: {}", savedEmployee.getId(), employeeCode);

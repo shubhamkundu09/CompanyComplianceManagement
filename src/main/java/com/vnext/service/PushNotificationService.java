@@ -89,10 +89,12 @@ public class PushNotificationService {
                 .map(DeviceToken::getDeviceToken)
                 .filter(t -> t != null && !t.trim().isEmpty())
                 .filter(t -> excludeToken == null || !t.trim().equalsIgnoreCase(excludeToken.trim()))
+                .distinct()
                 .collect(Collectors.toList());
 
         var realTokens = tokens.stream()
                 .filter(t -> !t.startsWith("SIMULATOR_") && !t.startsWith("MOCK_"))
+                .distinct()
                 .collect(Collectors.toList());
 
         if (realTokens.isEmpty()) {
@@ -119,10 +121,12 @@ public class PushNotificationService {
                 .stream()
                 .map(DeviceToken::getDeviceToken)
                 .filter(t -> t != null && !t.trim().isEmpty())
+                .distinct()
                 .collect(Collectors.toList());
 
         var realTokens = tokens.stream()
                 .filter(t -> !t.startsWith("SIMULATOR_") && !t.startsWith("MOCK_"))
+                .distinct()
                 .collect(Collectors.toList());
 
         if (realTokens.isEmpty()) {

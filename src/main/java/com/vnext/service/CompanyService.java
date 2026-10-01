@@ -148,7 +148,7 @@ public class CompanyService {
             // Don't throw - company creation should succeed even if compliance assignment fails
         }
 
-        // Send credentials email
+        // Send credentials email to Company Admin
         try {
             emailService.sendCredentialsEmail(
                     companyDTO.getAdminEmail(),
@@ -159,6 +159,42 @@ public class CompanyService {
             log.info("Credentials email sent successfully to: {}", companyDTO.getAdminEmail());
         } catch (Exception e) {
             log.error("Failed to send email to: {}", companyDTO.getAdminEmail(), e);
+        }
+
+        // Send company registration alert to SuperAdmins
+        try {
+            List<User> superAdmins = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN);
+            for (User sa : superAdmins) {
+                if (sa.getEmail() != null && !sa.getEmail().trim().isEmpty()) {
+                    emailService.sendCompanyRegistrationAlertToSuperAdmin(
+                            sa.getEmail(),
+                            savedCompany.getName(),
+                            savedCompany.getEmail(),
+                            savedAdmin.getFullName(),
+                            savedAdmin.getEmail(),
+                            savedCompany.getPhone(),
+                            savedCompany.getGstNumber(),
+                            savedCompany.getPanNumber()
+                    );
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to send company registration alert to SuperAdmins: {}", e.getMessage());
+        }
+
+        // Send welcome / confirmation email to Company Email (if different from admin email)
+        try {
+            if (savedCompany.getEmail() != null && !savedCompany.getEmail().equalsIgnoreCase(savedAdmin.getEmail())) {
+                emailService.sendCompanyWelcomeEmail(
+                        savedCompany.getEmail(),
+                        savedCompany.getName(),
+                        savedAdmin.getFullName(),
+                        savedAdmin.getEmail(),
+                        null
+                );
+            }
+        } catch (Exception e) {
+            log.error("Failed to send welcome email to company email: {}", e.getMessage());
         }
 
         log.info("Company created successfully with ID: {}", savedCompany.getId());
@@ -315,6 +351,45 @@ public class CompanyService {
 
         Company updatedCompany = companyRepository.save(company);
         log.info("Company updated successfully with ID: {}", updatedCompany.getId());
+
+        // Send email notifications for company update
+        try {
+            String updatedSummary = String.format("Company details updated for %s. Name: %s, Email: %s, Phone: %s, Status: %s",
+                    updatedCompany.getName(), updatedCompany.getName(), updatedCompany.getEmail(),
+                    updatedCompany.getPhone() != null ? updatedCompany.getPhone() : "N/A",
+                    updatedCompany.getStatus());
+
+            // 1. SuperAdmins
+            List<User> superAdmins = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN);
+            for (User sa : superAdmins) {
+                if (sa.getEmail() != null && !sa.getEmail().trim().isEmpty()) {
+                    emailService.sendCompanyUpdatedEmail(sa.getEmail(), sa.getFullName(), updatedCompany.getName(), updatedSummary);
+                }
+            }
+
+            // 2. Company Admin
+            if (updatedCompany.getCompanyAdmin() != null && updatedCompany.getCompanyAdmin().getEmail() != null) {
+                emailService.sendCompanyUpdatedEmail(
+                        updatedCompany.getCompanyAdmin().getEmail(),
+                        updatedCompany.getCompanyAdmin().getFullName(),
+                        updatedCompany.getName(),
+                        updatedSummary
+                );
+            }
+
+            // 3. Company Email (if different from Company Admin)
+            if (updatedCompany.getEmail() != null && (updatedCompany.getCompanyAdmin() == null || !updatedCompany.getEmail().equalsIgnoreCase(updatedCompany.getCompanyAdmin().getEmail()))) {
+                emailService.sendCompanyUpdatedEmail(
+                        updatedCompany.getEmail(),
+                        updatedCompany.getName(),
+                        updatedCompany.getName(),
+                        updatedSummary
+                );
+            }
+        } catch (Exception e) {
+            log.error("Failed to send company update emails: {}", e.getMessage());
+        }
+
         notificationEventService.notifySuperAdminsPushOnly(
                 "Company Updated",
                 "Company " + company.getName() + " has been updated.",
@@ -455,9 +530,36 @@ public class CompanyService {
         log.debug("Deleted {} users for company ID={}", allCompanyUsers.size(), companyId);
 
         // ── STEP 13: Delete the Company root record ───────────────────────────────
+        String companyEmail = company.getEmail();
+        String adminEmail = company.getCompanyAdmin() != null ? company.getCompanyAdmin().getEmail() : null;
+        String adminName = company.getCompanyAdmin() != null ? company.getCompanyAdmin().getFullName() : "Company Admin";
+
         companyRepository.delete(company);
         companyRepository.flush();
         log.info("Company ID={} ('{}') permanently deleted — all child records removed", companyId, companyName);
+
+        // Send deletion email notifications
+        try {
+            // 1. SuperAdmins
+            List<User> superAdmins = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN);
+            for (User sa : superAdmins) {
+                if (sa.getEmail() != null && !sa.getEmail().trim().isEmpty()) {
+                    emailService.sendCompanyDeletedEmail(sa.getEmail(), sa.getFullName(), companyName);
+                }
+            }
+
+            // 2. Company Admin
+            if (adminEmail != null && !adminEmail.trim().isEmpty()) {
+                emailService.sendCompanyDeletedEmail(adminEmail, adminName, companyName);
+            }
+
+            // 3. Company Email (if different from admin email)
+            if (companyEmail != null && !companyEmail.trim().isEmpty() && !companyEmail.equalsIgnoreCase(adminEmail)) {
+                emailService.sendCompanyDeletedEmail(companyEmail, companyName, companyName);
+            }
+        } catch (Exception e) {
+            log.error("Failed to send company deletion emails: {}", e.getMessage());
+        }
 
         // ── STEP 14: Notify SuperAdmins ──────────────────────────────────────────
         notificationEventService.notifySuperAdminsPushOnly(

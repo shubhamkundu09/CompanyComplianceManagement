@@ -208,6 +208,319 @@ public class EmailService {
         }
     }
 
+    // ==================== COMPANY EVENT EMAILS ====================
+
+    public void sendCompanyRegistrationAlertToSuperAdmin(String superAdminEmail, String companyName, String companyEmail,
+                                                        String adminName, String adminEmail, String phone,
+                                                        String gstNumber, String panNumber) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromEmail);
+            helper.setTo(superAdminEmail);
+            helper.setSubject("🏢 New Company Registered: " + companyName);
+
+            String htmlContent = String.format("""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1F2937;">
+                    <div style="background-color: #4F46E5; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: #ffffff; margin: 0;">New Company Registration</h2>
+                    </div>
+                    <div style="border: 1px solid #E5E7EB; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+                        <p>Hello Super Admin,</p>
+                        <p>A new company has registered on the <strong>VNext Compliance Platform</strong>.</p>
+                        <div style="background-color: #F9FAFB; padding: 16px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #4F46E5;">
+                            <p style="margin: 6px 0;"><strong>Company Name:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>Company Email:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>Company Admin:</strong> %s (%s)</p>
+                            <p style="margin: 6px 0;"><strong>Phone:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>GST Number:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>PAN Number:</strong> %s</p>
+                        </div>
+                        <p>You can view and manage this company from the Super Admin dashboard.</p>
+                        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+                        <p style="color: #6B7280; font-size: 12px; margin: 0;">This is an automated notification from VNext LLP.</p>
+                    </div>
+                </div>
+                """, companyName, companyEmail, adminName, adminEmail,
+                    phone != null ? phone : "N/A",
+                    gstNumber != null ? gstNumber : "N/A",
+                    panNumber != null ? panNumber : "N/A");
+
+            helper.setText(htmlContent, true);
+            mailSender.send(message);
+            log.info("Company registration alert email sent to Super Admin: {}", superAdminEmail);
+        } catch (MessagingException | MailException e) {
+            log.error("Failed to send company registration alert to Super Admin: {}", superAdminEmail, e);
+        }
+    }
+
+    public void sendCompanyWelcomeEmail(String toEmail, String companyName, String adminName, String adminEmail, String tempPassword) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromEmail);
+            helper.setTo(toEmail);
+            helper.setSubject("🎉 Welcome to VNext LLP - Company Registration Confirmed");
+
+            String passwordSection = (tempPassword != null && !tempPassword.trim().isEmpty()) ? String.format("""
+                <div style="background-color: #F3F4F6; padding: 16px; border-radius: 6px; margin: 16px 0;">
+                    <p style="margin: 4px 0;"><strong>Admin Email:</strong> %s</p>
+                    <p style="margin: 4px 0;"><strong>Temporary Password:</strong> %s</p>
+                </div>
+                <p style="color: #DC2626; font-size: 13px;"><em>Please change your password immediately after your first login.</em></p>
+                """, adminEmail, tempPassword) : "";
+
+            String htmlContent = String.format("""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1F2937;">
+                    <div style="background-color: #4F46E5; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: #ffffff; margin: 0;">Welcome to VNext LLP!</h2>
+                    </div>
+                    <div style="border: 1px solid #E5E7EB; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+                        <p>Dear %s,</p>
+                        <p>We are delighted to confirm that <strong>%s</strong> has been successfully registered on the VNext Compliance Management Platform.</p>
+                        %s
+                        <p>With VNext, you can manage your statutory compliances, track deadlines, assign tasks to employees, and stay ahead of audits effortlessly.</p>
+                        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+                        <p style="color: #6B7280; font-size: 12px; margin: 0;">This is an automated message from VNext LLP.</p>
+                    </div>
+                </div>
+                """, adminName, companyName, passwordSection);
+
+            helper.setText(htmlContent, true);
+            mailSender.send(message);
+            log.info("Company welcome email sent successfully to: {}", toEmail);
+        } catch (MessagingException | MailException e) {
+            log.error("Failed to send company welcome email to: {}", toEmail, e);
+        }
+    }
+
+    public void sendCompanyUpdatedEmail(String toEmail, String recipientName, String companyName, String updatedFieldsSummary) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromEmail);
+            helper.setTo(toEmail);
+            helper.setSubject("📝 Company Profile Updated: " + companyName);
+
+            String htmlContent = String.format("""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1F2937;">
+                    <div style="background-color: #2563EB; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: #ffffff; margin: 0;">Company Profile Updated</h2>
+                    </div>
+                    <div style="border: 1px solid #E5E7EB; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+                        <p>Hello %s,</p>
+                        <p>The profile details for <strong>%s</strong> have been updated successfully.</p>
+                        <div style="background-color: #F9FAFB; padding: 16px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #2563EB;">
+                            <p style="margin: 0;">%s</p>
+                        </div>
+                        <p>If you did not authorize these changes, please contact our support team immediately.</p>
+                        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+                        <p style="color: #6B7280; font-size: 12px; margin: 0;">This is an automated notification from VNext LLP.</p>
+                    </div>
+                </div>
+                """, recipientName, companyName, updatedFieldsSummary != null ? updatedFieldsSummary : "Profile information updated.");
+
+            helper.setText(htmlContent, true);
+            mailSender.send(message);
+            log.info("Company updated email sent to: {}", toEmail);
+        } catch (MessagingException | MailException e) {
+            log.error("Failed to send company updated email to: {}", toEmail, e);
+        }
+    }
+
+    public void sendCompanyDeletedEmail(String toEmail, String recipientName, String companyName) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromEmail);
+            helper.setTo(toEmail);
+            helper.setSubject("⚠️ Company Deactivated / Deleted: " + companyName);
+
+            String htmlContent = String.format("""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1F2937;">
+                    <div style="background-color: #DC2626; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: #ffffff; margin: 0;">Company Deletion Notice</h2>
+                    </div>
+                    <div style="border: 1px solid #E5E7EB; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+                        <p>Hello %s,</p>
+                        <p>The company <strong>%s</strong> has been removed/deactivated on the VNext Compliance Platform.</p>
+                        <p>All active compliance schedules, assignments, and access for this company have been deactivated.</p>
+                        <p>If you believe this was done in error, please contact system administration.</p>
+                        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+                        <p style="color: #6B7280; font-size: 12px; margin: 0;">This is an automated notification from VNext LLP.</p>
+                    </div>
+                </div>
+                """, recipientName, companyName);
+
+            helper.setText(htmlContent, true);
+            mailSender.send(message);
+            log.info("Company deleted email sent to: {}", toEmail);
+        } catch (MessagingException | MailException e) {
+            log.error("Failed to send company deleted email to: {}", toEmail, e);
+        }
+    }
+
+    // ==================== EMPLOYEE EVENT EMAILS ====================
+
+    public void sendEmployeeCreatedAlertToSuperAdmin(String superAdminEmail, String companyName,
+                                                    String employeeName, String employeeEmail,
+                                                    String designation, String department, String employeeCode) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromEmail);
+            helper.setTo(superAdminEmail);
+            helper.setSubject("👤 New Employee Added: " + employeeName + " (" + companyName + ")");
+
+            String htmlContent = String.format("""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1F2937;">
+                    <div style="background-color: #0D9488; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: #ffffff; margin: 0;">New Employee Added</h2>
+                    </div>
+                    <div style="border: 1px solid #E5E7EB; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+                        <p>Hello Super Admin,</p>
+                        <p>A new employee has been added to company <strong>%s</strong>:</p>
+                        <div style="background-color: #F9FAFB; padding: 16px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #0D9488;">
+                            <p style="margin: 6px 0;"><strong>Employee Name:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>Email:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>Employee Code:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>Designation:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>Department:</strong> %s</p>
+                        </div>
+                        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+                        <p style="color: #6B7280; font-size: 12px; margin: 0;">This is an automated notification from VNext LLP.</p>
+                    </div>
+                </div>
+                """, companyName, employeeName, employeeEmail,
+                    employeeCode != null ? employeeCode : "N/A",
+                    designation != null ? designation : "N/A",
+                    department != null ? department : "N/A");
+
+            helper.setText(htmlContent, true);
+            mailSender.send(message);
+            log.info("Employee created alert email sent to Super Admin: {}", superAdminEmail);
+        } catch (MessagingException | MailException e) {
+            log.error("Failed to send employee created alert to Super Admin: {}", superAdminEmail, e);
+        }
+    }
+
+    public void sendEmployeeCreatedConfirmationToCompanyAdmin(String companyAdminEmail, String companyAdminName,
+                                                              String companyName, String employeeName,
+                                                              String employeeEmail, String employeeCode) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromEmail);
+            helper.setTo(companyAdminEmail);
+            helper.setSubject("✅ Employee Account Created: " + employeeName);
+
+            String htmlContent = String.format("""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1F2937;">
+                    <div style="background-color: #0D9488; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: #ffffff; margin: 0;">Employee Created Successfully</h2>
+                    </div>
+                    <div style="border: 1px solid #E5E7EB; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+                        <p>Dear %s,</p>
+                        <p>You have successfully added a new employee to <strong>%s</strong>:</p>
+                        <div style="background-color: #F9FAFB; padding: 16px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #0D9488;">
+                            <p style="margin: 6px 0;"><strong>Name:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>Email:</strong> %s</p>
+                            <p style="margin: 6px 0;"><strong>Employee Code:</strong> %s</p>
+                        </div>
+                        <p>An email with login credentials has been sent directly to the employee.</p>
+                        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+                        <p style="color: #6B7280; font-size: 12px; margin: 0;">This is an automated notification from VNext LLP.</p>
+                    </div>
+                </div>
+                """, companyAdminName, companyName, employeeName, employeeEmail,
+                    employeeCode != null ? employeeCode : "N/A");
+
+            helper.setText(htmlContent, true);
+            mailSender.send(message);
+            log.info("Employee creation confirmation email sent to Company Admin: {}", companyAdminEmail);
+        } catch (MessagingException | MailException e) {
+            log.error("Failed to send employee creation confirmation to Company Admin: {}", companyAdminEmail, e);
+        }
+    }
+
+    // ==================== COMPANY ADMIN OVERDUE EMAIL ====================
+
+    public void sendOverdueEmailToCompanyAdmin(String companyAdminEmail, String companyAdminName,
+                                              String companyName, List<OverdueComplianceInfo> overdueList) {
+        if (overdueList == null || overdueList.isEmpty()) return;
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromEmail);
+            helper.setTo(companyAdminEmail);
+            helper.setSubject("⚠️ Urgent: Overdue Compliances Alert - " + companyName);
+
+            StringBuilder tableRows = new StringBuilder();
+            for (OverdueComplianceInfo info : overdueList) {
+                tableRows.append(String.format("""
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #E5E7EB;">%s</td>
+                        <td style="padding: 10px; border: 1px solid #E5E7EB;">%s</td>
+                        <td style="padding: 10px; border: 1px solid #E5E7EB;">%s</td>
+                        <td style="padding: 10px; border: 1px solid #E5E7EB; color: #DC2626; font-weight: bold;">%d day%s</td>
+                        <td style="padding: 10px; border: 1px solid #E5E7EB;">%s</td>
+                    </tr>
+                    """,
+                        info.getComplianceName(),
+                        info.getSubComplianceName() != null ? info.getSubComplianceName() : "—",
+                        info.getDueDate() != null ? info.getDueDate().format(DATE_FORMATTER) : "N/A",
+                        info.getOverdueDays(),
+                        info.getOverdueDays() == 1 ? "" : "s",
+                        info.getAssignedTo() != null ? info.getAssignedTo() : "Company Admin"
+                ));
+            }
+
+            String htmlContent = String.format("""
+                <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; color: #1F2937;">
+                    <div style="background-color: #DC2626; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: #ffffff; margin: 0;">⚠️ Compliance Overdue Notice</h2>
+                    </div>
+                    <div style="border: 1px solid #E5E7EB; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+                        <p>Dear %s,</p>
+                        <p>The following statutory/regulatory compliance(s) for <strong>%s</strong> are currently <strong>OVERDUE</strong>. Immediate submission is required to avoid penalties or legal repercussions.</p>
+
+                        <table style="width: 100%%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
+                            <thead>
+                                <tr style="background-color: #F3F4F6;">
+                                    <th style="padding: 10px; border: 1px solid #E5E7EB; text-align: left;">Compliance</th>
+                                    <th style="padding: 10px; border: 1px solid #E5E7EB; text-align: left;">Sub-Compliance</th>
+                                    <th style="padding: 10px; border: 1px solid #E5E7EB; text-align: left;">Due Date</th>
+                                    <th style="padding: 10px; border: 1px solid #E5E7EB; text-align: left;">Overdue By</th>
+                                    <th style="padding: 10px; border: 1px solid #E5E7EB; text-align: left;">Assigned To</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                %s
+                            </tbody>
+                        </table>
+
+                        <p>Please log in to your Company Admin portal to review and complete these submissions.</p>
+                        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
+                        <p style="color: #6B7280; font-size: 12px; margin: 0;">This is an automated reminder from VNext LLP.</p>
+                    </div>
+                </div>
+                """, companyAdminName, companyName, tableRows.toString());
+
+            helper.setText(htmlContent, true);
+            mailSender.send(message);
+            log.info("Overdue email sent to Company Admin: {}", companyAdminEmail);
+        } catch (MessagingException | MailException e) {
+            log.error("Failed to send overdue email to Company Admin: {}", companyAdminEmail, e);
+        }
+    }
+
     // ==================== SIMPLE EMAIL ====================
 
     public void sendSimpleEmail(String to, String subject, String content) {

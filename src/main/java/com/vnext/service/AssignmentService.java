@@ -212,6 +212,35 @@ public class AssignmentService {
             }
         }
 
+        // Also synchronize any template-level assignment configs for employees in the same company
+        if (companyCompliance.getCompany() != null) {
+            Long companyId = companyCompliance.getCompany().getId();
+            if (companyCompliance.getSubTemplate() != null) {
+                List<ComplianceConfig> relatedConfigs = configRepository.findAllBySubTemplateId(companyCompliance.getSubTemplate().getId());
+                for (ComplianceConfig rc : relatedConfigs) {
+                    if (rc.getId() != null && (config == null || !rc.getId().equals(config.getId()))) {
+                        List<EmployeeAssignment> assignments = assignmentRepository.findByConfigIdAndIsActiveTrue(rc.getId());
+                        for (EmployeeAssignment assignment : assignments) {
+                            if (assignment.getEmployeeId() != null) {
+                                User emp = userRepository.findById(assignment.getEmployeeId()).orElse(null);
+                                if (emp != null && emp.getCompany() != null && companyId.equals(emp.getCompany().getId())) {
+                                    assignment.setCompletedAt(now);
+                                    assignment.setCompletedBy(adminId);
+                                    if (submissionReference != null && !submissionReference.trim().isEmpty()) {
+                                        assignment.setSubmissionReference(submissionReference);
+                                    }
+                                    if (documentUrl != null && !documentUrl.trim().isEmpty()) {
+                                        assignment.setSubmissionDocumentUrl(documentUrl);
+                                    }
+                                    assignmentRepository.save(assignment);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // If it's a sub-compliance, update parent compliance status
         if (!Boolean.TRUE.equals(companyCompliance.getIsParent()) && companyCompliance.getCompany() != null) {
             Long companyId = companyCompliance.getCompany().getId();
@@ -226,7 +255,7 @@ public class AssignmentService {
                         .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, parentTemplateId);
 
                 boolean allSubsCompleted = subCCs != null && !subCCs.isEmpty() && subCCs.stream()
-                        .allMatch(sub -> sub.getStatus() == ComplianceStatus.COMPLETED);
+                        .allMatch(sub -> sub.getStatus() == ComplianceStatus.COMPLETED || sub.getCompletedAt() != null);
 
                 for (CompanyCompliance parentCC : parentCCs) {
                     if (allSubsCompleted) {
@@ -425,8 +454,22 @@ public class AssignmentService {
         }
 
         // 2. Mark CompanyCompliance as COMPLETED
-        if (config != null && config.getCompanyCompliance() != null) {
-            CompanyCompliance cc = config.getCompanyCompliance();
+        CompanyCompliance cc = (config != null && config.getCompanyCompliance() != null) ? config.getCompanyCompliance() : null;
+        if (cc == null && assignment.getEmployeeId() != null) {
+            Optional<User> empOpt = userRepository.findById(assignment.getEmployeeId());
+            if (empOpt.isPresent() && empOpt.get().getCompany() != null) {
+                Long compId = empOpt.get().getCompany().getId();
+                if (config != null && config.getSubTemplate() != null) {
+                    cc = companyComplianceRepository.findByCompanyIdAndSubTemplateId(compId, config.getSubTemplate().getId()).orElse(null);
+                }
+                if (cc == null && config != null && config.getTemplate() != null) {
+                    List<CompanyCompliance> ccs = companyComplianceRepository.findByCompanyIdAndTemplateIdAndIsActiveTrueAndDeletedFalse(compId, config.getTemplate().getId());
+                    if (!ccs.isEmpty()) cc = ccs.get(0);
+                }
+            }
+        }
+
+        if (cc != null) {
             cc.setStatus(ComplianceStatus.COMPLETED);
             cc.setCompletedAt(now);
             cc.setCompletedBy(userId);
@@ -452,7 +495,7 @@ public class AssignmentService {
                             .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, parentTemplateId);
 
                     boolean allSubsCompleted = subCCs != null && !subCCs.isEmpty() && subCCs.stream()
-                            .allMatch(sub -> sub.getStatus() == ComplianceStatus.COMPLETED);
+                            .allMatch(sub -> sub.getStatus() == ComplianceStatus.COMPLETED || sub.getCompletedAt() != null);
 
                     for (CompanyCompliance parentCC : parentCCs) {
                         if (allSubsCompleted) {

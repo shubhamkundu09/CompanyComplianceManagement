@@ -93,10 +93,16 @@ public class NotificationEventService {
         java.util.Set<Long> adminIds = new java.util.HashSet<>();
         if (companyId != null) {
             userRepository.findByCompanyIdAndRoleInAndDeletedFalse(companyId, List.of(UserRole.COMPANY_ADMIN, UserRole.SUB_ADMIN))
-                    .forEach(u -> adminIds.add(u.getId()));
+                    .forEach(u -> {
+                        if (u.getRole() != UserRole.SUPER_ADMIN) {
+                            adminIds.add(u.getId());
+                        }
+                    });
             companyRepository.findById(companyId).ifPresent(c -> {
                 if (c.getCompanyAdmin() != null && c.getCompanyAdmin().getId() != null) {
-                    adminIds.add(c.getCompanyAdmin().getId());
+                    if (c.getCompanyAdmin().getRole() != UserRole.SUPER_ADMIN) {
+                        adminIds.add(c.getCompanyAdmin().getId());
+                    }
                 }
             });
         }
@@ -108,9 +114,15 @@ public class NotificationEventService {
         List<com.vnext.entity.Company> activeCompanies = companyRepository.findActiveCompaniesByStatus(com.vnext.entity.CompanyStatus.ACTIVE);
         for (com.vnext.entity.Company c : activeCompanies) {
             userRepository.findByCompanyIdAndRoleInAndDeletedFalse(c.getId(), List.of(UserRole.COMPANY_ADMIN, UserRole.SUB_ADMIN))
-                    .forEach(u -> adminIds.add(u.getId()));
+                    .forEach(u -> {
+                        if (u.getRole() != UserRole.SUPER_ADMIN) {
+                            adminIds.add(u.getId());
+                        }
+                    });
             if (c.getCompanyAdmin() != null && c.getCompanyAdmin().getId() != null) {
-                adminIds.add(c.getCompanyAdmin().getId());
+                if (c.getCompanyAdmin().getRole() != UserRole.SUPER_ADMIN) {
+                    adminIds.add(c.getCompanyAdmin().getId());
+                }
             }
         }
         return new java.util.ArrayList<>(adminIds);
