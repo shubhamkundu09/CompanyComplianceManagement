@@ -8,7 +8,14 @@ import java.time.LocalDateTime;
 
 @EqualsAndHashCode(callSuper = true)
 @Entity
-@Table(name = "company_compliances")
+@Table(name = "company_compliances", indexes = {
+    @Index(name = "idx_cc_company_id", columnList = "company_id"),
+    @Index(name = "idx_cc_template_id", columnList = "template_id"),
+    @Index(name = "idx_cc_sub_template_id", columnList = "sub_template_id"),
+    @Index(name = "idx_cc_status", columnList = "status"),
+    @Index(name = "idx_cc_active_deleted", columnList = "is_active, is_deleted"),
+    @Index(name = "idx_cc_parent", columnList = "is_parent, parent_template_id")
+})
 @Data
 public class CompanyCompliance extends BaseEntity {
 

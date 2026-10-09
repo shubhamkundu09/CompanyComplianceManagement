@@ -7,7 +7,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "employee_assignments")
+@Table(name = "employee_assignments", indexes = {
+    @Index(name = "idx_ea_employee_id", columnList = "employee_id"),
+    @Index(name = "idx_ea_config_id", columnList = "config_id"),
+    @Index(name = "idx_ea_active_completed", columnList = "is_active, completed_at"),
+    @Index(name = "idx_ea_due_date", columnList = "due_date"),
+    @Index(name = "idx_ea_parent_assignment", columnList = "parent_assignment_id")
+})
 @Data
 public class EmployeeAssignment {
 

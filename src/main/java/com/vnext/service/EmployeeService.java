@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -85,17 +86,13 @@ public class EmployeeService {
         }
 
         // Push notification to Company Admin and SuperAdmins
-        if (company.getCompanyAdmin() != null) {
-            notificationEventService.notifyUserPushOnly(
-                    company.getCompanyAdmin().getId(),
-                    "Sub-Admin Created",
-                    "Sub-Admin " + saved.getFullName() + " has been added to " + company.getName() + ".",
-                    NotificationType.EMPLOYEE_CREATED,
-                    "employees"
-            );
+        Set<Long> recipientIds = new java.util.HashSet<>();
+        if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getId() != null) {
+            recipientIds.add(company.getCompanyAdmin().getId());
         }
-
-        notificationEventService.notifySuperAdminsPushOnly(
+        userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).forEach(sa -> recipientIds.add(sa.getId()));
+        notificationEventService.notifyUsersPushOnly(
+                new java.util.ArrayList<>(recipientIds),
                 "Sub-Admin Created",
                 "Sub-Admin " + saved.getFullName() + " has been added to " + company.getName() + ".",
                 NotificationType.EMPLOYEE_CREATED,
@@ -289,17 +286,13 @@ public class EmployeeService {
         log.info("Employee created successfully with ID: {} and code: {}", savedEmployee.getId(), employeeCode);
 
         // Push notification to Company Admin and SuperAdmins
-        if (company.getCompanyAdmin() != null) {
-            notificationEventService.notifyUserPushOnly(
-                    company.getCompanyAdmin().getId(),
-                    "Employee Created",
-                    "Employee " + savedEmployee.getFullName() + " has been added to " + company.getName() + ".",
-                    NotificationType.EMPLOYEE_CREATED,
-                    "employees"
-            );
+        Set<Long> recipientIds = new java.util.HashSet<>();
+        if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getId() != null) {
+            recipientIds.add(company.getCompanyAdmin().getId());
         }
-
-        notificationEventService.notifySuperAdminsPushOnly(
+        userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).forEach(sa -> recipientIds.add(sa.getId()));
+        notificationEventService.notifyUsersPushOnly(
+                new java.util.ArrayList<>(recipientIds),
                 "Employee Created",
                 "Employee " + savedEmployee.getFullName() + " has been added to " + company.getName() + ".",
                 NotificationType.EMPLOYEE_CREATED,
@@ -394,17 +387,13 @@ public class EmployeeService {
         }
 
         // Push notification to Company Admin and SuperAdmins
-        if (employee.getCompany() != null && employee.getCompany().getCompanyAdmin() != null) {
-            notificationEventService.notifyUserPushOnly(
-                    employee.getCompany().getCompanyAdmin().getId(),
-                    "Employee Removed",
-                    "Employee " + employee.getFullName() + " has been removed from your company.",
-                    NotificationType.EMPLOYEE_DELETED,
-                    "employees"
-            );
+        Set<Long> recipientIds = new java.util.HashSet<>();
+        if (employee.getCompany() != null && employee.getCompany().getCompanyAdmin() != null && employee.getCompany().getCompanyAdmin().getId() != null) {
+            recipientIds.add(employee.getCompany().getCompanyAdmin().getId());
         }
-
-        notificationEventService.notifySuperAdminsPushOnly(
+        userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).forEach(sa -> recipientIds.add(sa.getId()));
+        notificationEventService.notifyUsersPushOnly(
+                new java.util.ArrayList<>(recipientIds),
                 "Employee Removed",
                 "Employee " + employee.getFullName() + " has been removed from " + (employee.getCompany() != null ? employee.getCompany().getName() : "company") + ".",
                 NotificationType.EMPLOYEE_DELETED,

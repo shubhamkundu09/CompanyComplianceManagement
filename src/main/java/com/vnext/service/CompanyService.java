@@ -18,6 +18,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -231,8 +232,8 @@ public class CompanyService {
 
         for (ComplianceTemplate template : templates) {
             try {
-                // Assign each template to the company
-                complianceService.assignComplianceToCompany(template.getId(), companyId, company.getCreatedBy());
+                // Assign each template to the company without firing notifications in loop
+                complianceService.assignComplianceToCompany(template.getId(), companyId, company.getCreatedBy(), false);
                 assignedCount++;
                 log.info("Assigned template '{}' to company: {}", template.getName(), company.getName());
             } catch (Exception e) {
@@ -242,6 +243,24 @@ public class CompanyService {
 
         log.info("Successfully assigned {} out of {} compliances to company: {}",
                 assignedCount, templates.size(), company.getName());
+
+        if (assignedCount > 0) {
+            notificationEventService.notifySuperAdminsPushOnly(
+                    "Compliances Assigned",
+                    assignedCount + " compliance templates have been auto-assigned to " + company.getName() + ".",
+                    NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                    "compliance_details"
+            );
+            if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getId() != null) {
+                notificationEventService.notifyUserPushOnly(
+                        company.getCompanyAdmin().getId(),
+                        "Compliances Assigned",
+                        assignedCount + " compliance templates have been assigned to your company.",
+                        NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                        "compliance_details"
+                );
+            }
+        }
     }
 
 
@@ -390,22 +409,18 @@ public class CompanyService {
             log.error("Failed to send company update emails: {}", e.getMessage());
         }
 
-        notificationEventService.notifySuperAdminsPushOnly(
+        Set<Long> recipientIds = new java.util.HashSet<>();
+        userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).forEach(sa -> recipientIds.add(sa.getId()));
+        if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getId() != null) {
+            recipientIds.add(company.getCompanyAdmin().getId());
+        }
+        notificationEventService.notifyUsersPushOnly(
+                new java.util.ArrayList<>(recipientIds),
                 "Company Updated",
-                "Company " + company.getName() + " has been updated.",
+                "Company " + company.getName() + " details have been updated.",
                 NotificationType.COMPANY_UPDATED,
                 "company_details"
         );
-
-        if (company.getCompanyAdmin() != null) {
-            notificationEventService.notifyUserPushOnly(
-                    company.getCompanyAdmin().getId(),
-                    "Company Updated",
-                    "Your company " + company.getName() + " has been updated.",
-                    NotificationType.COMPANY_UPDATED,
-                    "company_details"
-            );
-        }
 
         return convertToDTO(updatedCompany);
     }
@@ -598,28 +613,20 @@ public class CompanyService {
 
         String statusText = status == CompanyStatus.ACTIVE ? "activated" : "deactivated";
         try {
-            notificationEventService.notifySuperAdminsPushOnly(
+            Set<Long> statusRecipientIds = new java.util.HashSet<>();
+            userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).forEach(sa -> statusRecipientIds.add(sa.getId()));
+            if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getId() != null) {
+                statusRecipientIds.add(company.getCompanyAdmin().getId());
+            }
+            notificationEventService.notifyUsersPushOnly(
+                    new java.util.ArrayList<>(statusRecipientIds),
                     "Company Status Changed",
                     "Company " + company.getName() + " has been " + statusText + ".",
                     NotificationType.COMPANY_STATUS_CHANGED,
                     "company_details"
             );
         } catch (Exception e) {
-            log.warn("Failed to notify super admins on company status change: {}", e.getMessage());
-        }
-
-        if (company.getCompanyAdmin() != null) {
-            try {
-                notificationEventService.notifyUserPushOnly(
-                        company.getCompanyAdmin().getId(),
-                        "Company Status Changed",
-                        "Your company has been " + statusText + ".",
-                        NotificationType.COMPANY_STATUS_CHANGED,
-                        "company_details"
-                );
-            } catch (Exception e) {
-                log.warn("Failed to notify company admin on company status change: {}", e.getMessage());
-            }
+            log.warn("Failed to notify on company status change: {}", e.getMessage());
         }
 
         log.info("Company status updated successfully for ID: {}", companyId);
@@ -843,22 +850,18 @@ public class CompanyService {
         log.info("Subscription extended for company {}", companyId);
 
 
-        notificationEventService.notifySuperAdminsPushOnly(
+        Set<Long> subRecipientIds = new java.util.HashSet<>();
+        userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).forEach(sa -> subRecipientIds.add(sa.getId()));
+        if (company.getCompanyAdmin() != null && company.getCompanyAdmin().getId() != null) {
+            subRecipientIds.add(company.getCompanyAdmin().getId());
+        }
+        notificationEventService.notifyUsersPushOnly(
+                new java.util.ArrayList<>(subRecipientIds),
                 "Subscription Extended",
                 "Subscription for " + company.getName() + " extended by " + additionalMonths + " months.",
                 NotificationType.SUBSCRIPTION_EXTENDED,
                 "company_details"
         );
-
-        if (company.getCompanyAdmin() != null) {
-            notificationEventService.notifyUserPushOnly(
-                    company.getCompanyAdmin().getId(),
-                    "Subscription Extended",
-                    "Your subscription has been extended by " + additionalMonths + " months.",
-                    NotificationType.SUBSCRIPTION_EXTENDED,
-                    "company_details"
-            );
-        }
     }
 
     // ==================== PASSWORD MANAGEMENT ====================

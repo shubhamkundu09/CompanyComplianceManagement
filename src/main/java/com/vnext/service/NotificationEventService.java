@@ -38,12 +38,19 @@ public class NotificationEventService {
     }
 
     public void notifyAllAdminsWithSave(String title, String body, NotificationType type, String screen) {
-        notifyAllAdminsPushOnly(title, body, type, screen);
+        notifyAllAdminsPushOnly(title, body, type, screen, null);
     }
 
     public void notifyAllAdminsPushOnly(String title, String body, NotificationType type, String screen) {
+        notifyAllAdminsPushOnly(title, body, type, screen, null);
+    }
+
+    public void notifyAllAdminsPushOnly(String title, String body, NotificationType type, String screen, Long excludeUserId) {
         var userIds = userRepository.findAllByRoleInAndDeletedFalse(List.of(UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN))
-                .stream().map(User::getId).collect(Collectors.toList());
+                .stream()
+                .map(User::getId)
+                .filter(id -> excludeUserId == null || !id.equals(excludeUserId))
+                .collect(Collectors.toList());
         notifyUsersPushOnly(userIds, title, body, type, screen);
     }
 
@@ -66,8 +73,15 @@ public class NotificationEventService {
     }
 
     public void notifySuperAdminsPushOnly(String title, String body, NotificationType type, String screen) {
+        notifySuperAdminsPushOnly(title, body, type, screen, null);
+    }
+
+    public void notifySuperAdminsPushOnly(String title, String body, NotificationType type, String screen, Long excludeUserId) {
         var userIds = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN)
-                .stream().map(User::getId).collect(Collectors.toList());
+                .stream()
+                .map(User::getId)
+                .filter(id -> excludeUserId == null || !id.equals(excludeUserId))
+                .collect(Collectors.toList());
         notifyUsersPushOnly(userIds, title, body, type, screen);
     }
 

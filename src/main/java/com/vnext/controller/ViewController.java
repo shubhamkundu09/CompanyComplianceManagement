@@ -172,7 +172,7 @@ public class ViewController {
         return "companyadmin/parent-compliances";
     }
 
-    @GetMapping("/company-admin/compliance/parent/{id}")
+    @GetMapping({"/company-admin/compliance/parent/{id}", "/company-admin/compliance/{id:[0-9]+}"})
     public String companyAdminParentComplianceDetails(@PathVariable Long id, Model model) {
         model.addAttribute("parentId", id);
         return "companyadmin/parent-compliance-details";

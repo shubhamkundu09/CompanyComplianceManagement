@@ -34,6 +34,9 @@ public interface EmployeeAssignmentRepository extends JpaRepository<EmployeeAssi
     @Query("SELECT e FROM EmployeeAssignment e WHERE e.config.id = :configId AND e.isActive = true")
     List<EmployeeAssignment> findByConfigIdAndIsActiveTrue(@Param("configId") Long configId);
 
+    @Query("SELECT e FROM EmployeeAssignment e WHERE e.config.id IN :configIds AND e.isActive = true")
+    List<EmployeeAssignment> findByConfigIdInAndIsActiveTrue(@Param("configIds") List<Long> configIds);
+
 
     @Query("SELECT ea FROM EmployeeAssignment ea " +
             "WHERE ea.isActive = true AND ea.completedAt IS NULL " +
@@ -102,6 +105,7 @@ public interface EmployeeAssignmentRepository extends JpaRepository<EmployeeAssi
 
 
     @Modifying
+    @Transactional
     @Query("DELETE FROM EmployeeAssignment e WHERE e.config.id IN :configIds")
     void deleteByConfigIds(@Param("configIds") List<Long> configIds);
 
@@ -109,4 +113,27 @@ public interface EmployeeAssignmentRepository extends JpaRepository<EmployeeAssi
     @Transactional
     @Query("DELETE FROM EmployeeAssignment e WHERE e.employeeId IN :employeeIds")
     void deleteAllByEmployeeIdIn(@Param("employeeIds") List<Long> employeeIds);
+
+    @Query(value = "SELECT ea FROM EmployeeAssignment ea " +
+            "LEFT JOIN FETCH ea.config c " +
+            "LEFT JOIN FETCH c.companyCompliance cc " +
+            "LEFT JOIN FETCH cc.template t " +
+            "LEFT JOIN FETCH cc.subTemplate st " +
+            "LEFT JOIN FETCH c.template ct " +
+            "LEFT JOIN FETCH c.subTemplate cst " +
+            "WHERE ea.employeeId = :employeeId AND ea.isActive = true",
+           countQuery = "SELECT COUNT(ea) FROM EmployeeAssignment ea WHERE ea.employeeId = :employeeId AND ea.isActive = true")
+    Page<EmployeeAssignment> findByEmployeeIdWithDetails(@Param("employeeId") Long employeeId, Pageable pageable);
+
+    @Query("SELECT COUNT(ea) FROM EmployeeAssignment ea WHERE ea.employeeId = :employeeId AND ea.isActive = true")
+    long countByEmployeeIdAndIsActiveTrue(@Param("employeeId") Long employeeId);
+
+    @Query("SELECT COUNT(ea) FROM EmployeeAssignment ea WHERE ea.employeeId = :employeeId AND ea.isActive = true AND ea.completedAt IS NOT NULL")
+    long countCompletedByEmployeeId(@Param("employeeId") Long employeeId);
+
+    @Query("SELECT COUNT(ea) FROM EmployeeAssignment ea WHERE ea.employeeId = :employeeId AND ea.isActive = true AND ea.completedAt IS NULL AND ea.dueDate < :today")
+    long countOverdueByEmployeeId(@Param("employeeId") Long employeeId, @Param("today") LocalDate today);
+
+    @Query("SELECT COUNT(ea) FROM EmployeeAssignment ea WHERE ea.employeeId = :employeeId AND ea.isActive = true AND ea.completedAt IS NULL AND (ea.dueDate >= :today OR ea.dueDate IS NULL)")
+    long countPendingByEmployeeId(@Param("employeeId") Long employeeId, @Param("today") LocalDate today);
 }

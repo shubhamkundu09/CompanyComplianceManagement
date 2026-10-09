@@ -14,12 +14,14 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -521,7 +523,12 @@ public class ComplianceService {
      */
     @Transactional
     public void assignComplianceToCompany(Long templateId, Long companyId, Long adminId) {
-        log.info("=== Assigning compliance template {} to company {} ===", templateId, companyId);
+        assignComplianceToCompany(templateId, companyId, adminId, true);
+    }
+
+    @Transactional
+    public void assignComplianceToCompany(Long templateId, Long companyId, Long adminId, boolean sendNotifications) {
+        log.info("=== Assigning compliance template {} to company {} (sendNotifications={}) ===", templateId, companyId, sendNotifications);
 
         User admin = userRepository.findById(adminId)
                 .orElseThrow(() -> new ResourceNotFoundException("Admin not found with ID: " + adminId));
@@ -638,36 +645,62 @@ public class ComplianceService {
 
         log.info("=== Compliance assigned successfully to company: {} ===", companyId);
 
-        // Notifications
-        notificationEventService.notifySuperAdminsPushOnly(
-                "Company Assigned to Compliance",
-                "Company " + company.getName() + " has been assigned to \"" + template.getName() + "\".",
-                NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
-                "compliance_details"
-        );
+        // Notifications (only if single direct assignment, not inside bulk loops)
+        if (sendNotifications) {
+            notificationEventService.notifySuperAdminsPushOnly(
+                    "Company Assigned to Compliance",
+                    "Company " + company.getName() + " has been assigned to \"" + template.getName() + "\".",
+                    NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                    "compliance_details"
+            );
 
-        notificationEventService.notifyCompanyAdminsPushOnly(
-                companyId,
-                "New Compliance Assigned",
-                "Compliance \"" + template.getName() + "\" has been assigned to your company.",
-                NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
-                "compliance_details"
-        );
+            notificationEventService.notifyCompanyAdminsPushOnly(
+                    companyId,
+                    "New Compliance Assigned",
+                    "Compliance \"" + template.getName() + "\" has been assigned to your company.",
+                    NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                    "compliance_details"
+            );
+        }
     }
-
-
 
     @Transactional
     public void assignComplianceToCompanies(ComplianceAssignDTO assignDTO, Long adminId) {
         log.info("Assigning compliance template {} to {} companies", assignDTO.getTemplateId(), assignDTO.getCompanyIds().size());
 
+        ComplianceTemplate template = templateRepository.findById(assignDTO.getTemplateId())
+                .orElse(null);
+        String templateName = template != null ? template.getName() : "Compliance";
+
+        int successCount = 0;
+        List<Long> assignedCompanyIds = new ArrayList<>();
         for (Long companyId : assignDTO.getCompanyIds()) {
             try {
-                assignComplianceToCompany(assignDTO.getTemplateId(), companyId, adminId);
+                assignComplianceToCompany(assignDTO.getTemplateId(), companyId, adminId, false);
+                successCount++;
+                assignedCompanyIds.add(companyId);
             } catch (BusinessException e) {
                 log.warn("Skipping company {}: {}", companyId, e.getMessage());
             } catch (Exception e) {
                 log.error("Failed to assign to company {}: {}", companyId, e.getMessage(), e);
+            }
+        }
+
+        if (successCount > 0) {
+            notificationEventService.notifySuperAdminsPushOnly(
+                    "Compliance Assigned",
+                    "Compliance \"" + templateName + "\" assigned to " + successCount + " companies.",
+                    NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                    "compliance_details"
+            );
+            for (Long cid : assignedCompanyIds) {
+                notificationEventService.notifyCompanyAdminsPushOnly(
+                        cid,
+                        "New Compliance Assigned",
+                        "Compliance \"" + templateName + "\" has been assigned to your company.",
+                        NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                        "compliance_details"
+                );
             }
         }
     }
@@ -684,14 +717,31 @@ public class ComplianceService {
             throw new BusinessException("No active companies found to assign compliance");
         }
 
+        int successCount = 0;
         for (Company company : activeCompanies) {
             try {
-                assignComplianceToCompany(templateId, company.getId(), adminId);
+                assignComplianceToCompany(templateId, company.getId(), adminId, false);
+                successCount++;
             } catch (BusinessException e) {
                 log.warn("Skipping company {}: {}", company.getId(), e.getMessage());
             } catch (Exception e) {
                 log.error("Failed to assign to company {}: {}", company.getId(), e.getMessage(), e);
             }
+        }
+
+        if (successCount > 0) {
+            notificationEventService.notifySuperAdminsPushOnly(
+                    "Compliance Assigned to All Companies",
+                    "Compliance \"" + template.getName() + "\" has been assigned to " + successCount + " active companies.",
+                    NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                    "compliance_details"
+            );
+            notificationEventService.notifyAllActiveCompanyAdminsPushOnly(
+                    "New Compliance Assigned",
+                    "Compliance \"" + template.getName() + "\" has been assigned to your company.",
+                    NotificationType.COMPANY_ASSIGNED_TO_COMPLIANCE,
+                    "compliance_details"
+            );
         }
     }
 
@@ -808,9 +858,18 @@ public class ComplianceService {
                     if (config.getFrequency() != null) {
                         subDto.setFrequency(config.getFrequency().name());
                     }
-                    LocalDate effectiveDueDate = calculateEffectiveDueDate(config);
+                    LocalDate effectiveDueDate = (config.getFrequency() == ComplianceFrequency.ONE_TIME)
+                            ? (config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate())
+                            : calculateEffectiveDueDate(config);
                     if (effectiveDueDate != null) {
                         subDto.setDueDate(effectiveDueDate.atStartOfDay());
+                        if (subDto.getStatus() != ComplianceStatus.COMPLETED && subCC.getCompletedAt() == null) {
+                            if (effectiveDueDate.isBefore(LocalDate.now(IST_ZONE))) {
+                                subDto.setStatus(ComplianceStatus.OVERDUE);
+                            } else if (subDto.getStatus() == ComplianceStatus.OVERDUE) {
+                                subDto.setStatus(ComplianceStatus.IN_PROGRESS);
+                            }
+                        }
                     }
                     subDto.setInstructions(config.getInstructions());
                     subDto.setDocumentRequired(config.getDocumentRequired());
@@ -1895,13 +1954,9 @@ if (parentCC == null) {
                 if (cc.getCompany() != null && cc.getCompany().getId().equals(companyId) && Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted()) {
                     if (cc.isParent() || cc.getSubTemplate() == null) {
                         parentIds.add(cc.getId());
-                        if (cc.getTemplate() != null) {
-                            parentIds.add(cc.getTemplate().getId());
-                        }
                     } else {
                         Long tId = cc.getParentTemplateId() != null ? cc.getParentTemplateId() : (cc.getTemplate() != null ? cc.getTemplate().getId() : null);
                         if (tId != null) {
-                            parentIds.add(tId);
                             companyComplianceRepository
                                     .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, tId)
                                     .ifPresent(p -> parentIds.add(p.getId()));
@@ -1991,12 +2046,25 @@ if (parentCC == null) {
             }
         }
 
+        // If parentCC resolved to a sub-compliance entity, find its true parent CompanyCompliance
+        if (parentCC != null && (!parentCC.isParent() || parentCC.getSubTemplate() != null || parentCC.getParentTemplateId() != null)) {
+            Long tId = parentCC.getParentTemplateId() != null ? parentCC.getParentTemplateId() : (parentCC.getTemplate() != null ? parentCC.getTemplate().getId() : null);
+            if (tId != null) {
+                CompanyCompliance resolvedParent = companyComplianceRepository
+                        .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, tId)
+                        .orElse(null);
+                if (resolvedParent != null) {
+                    parentCC = resolvedParent;
+                }
+            }
+        }
+
         if (parentCC == null) {
             log.warn("Parent compliance {} not found for company {}", parentId, companyId);
             return;
         }
 
-        Long templateId = parentCC.getTemplate().getId();
+        Long templateId = parentCC.getTemplate() != null ? parentCC.getTemplate().getId() : parentCC.getParentTemplateId();
 
         // 1. Delete parent assignment
         Optional<ComplianceConfig> parentConfigOpt = configRepository.findByCompanyComplianceId(parentCC.getId());
@@ -2011,15 +2079,17 @@ if (parentCC == null) {
         }
 
         // 2. Delete all sub-compliance assignments for this employee & parent template
-        List<CompanyCompliance> subCCs = companyComplianceRepository
-                .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, templateId);
+        if (templateId != null) {
+            List<CompanyCompliance> subCCs = companyComplianceRepository
+                    .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, templateId);
 
-        for (CompanyCompliance subCC : subCCs) {
-            Optional<ComplianceConfig> subConfigOpt = configRepository.findByCompanyComplianceId(subCC.getId());
-            if (subConfigOpt.isPresent()) {
-                Optional<EmployeeAssignment> subAssign = assignmentRepository
-                        .findByConfigIdAndEmployeeIdAndIsActiveTrue(subConfigOpt.get().getId(), employeeId);
-                subAssign.ifPresent(assignmentRepository::delete);
+            for (CompanyCompliance subCC : subCCs) {
+                Optional<ComplianceConfig> subConfigOpt = configRepository.findByCompanyComplianceId(subCC.getId());
+                if (subConfigOpt.isPresent()) {
+                    Optional<EmployeeAssignment> subAssign = assignmentRepository
+                            .findByConfigIdAndEmployeeIdAndIsActiveTrue(subConfigOpt.get().getId(), employeeId);
+                    subAssign.ifPresent(assignmentRepository::delete);
+                }
             }
         }
 
@@ -2032,7 +2102,15 @@ if (parentCC == null) {
             }
         }
 
-        // 4. Notify employee
+        // 4. If parentId was a direct config/sub-assignment, delete if still active
+        Optional<ComplianceConfig> directConfigOpt = configRepository.findById(parentId);
+        if (directConfigOpt.isPresent()) {
+            Optional<EmployeeAssignment> directAssign = assignmentRepository
+                    .findByConfigIdAndEmployeeIdAndIsActiveTrue(directConfigOpt.get().getId(), employeeId);
+            directAssign.ifPresent(assignmentRepository::delete);
+        }
+
+        // 5. Notify employee
         try {
             String parentName = parentCC.getTemplate() != null ? parentCC.getTemplate().getName() : "Compliance";
             notificationEventService.notifyUserPushOnly(
@@ -2288,37 +2366,316 @@ if (parentCC == null) {
                 .collect(Collectors.toList());
     }
 
+    public boolean isParentWithSubCompliances(CompanyCompliance cc) {
+        if (cc == null || cc.getTemplate() == null) return false;
+        if (cc.getSubTemplate() != null || Boolean.FALSE.equals(cc.getIsParent())) {
+            return false;
+        }
+        if (cc.getCompany() != null) {
+            List<CompanyCompliance> subs = companyComplianceRepository.findSubCompliancesByCompanyIdAndParentTemplateId(
+                    cc.getCompany().getId(), cc.getTemplate().getId());
+            if (subs != null && !subs.isEmpty()) {
+                return true;
+            }
+        }
+        if (subTemplateRepository != null) {
+            return !subTemplateRepository.findByParentTemplateIdAndIsActiveTrueOrderByDisplayOrderAsc(cc.getTemplate().getId()).isEmpty();
+        }
+        return false;
+    }
+
+    @Transactional
+    public void syncOverdueComplianceStatuses() {
+        LocalDate today = LocalDate.now(IST_ZONE);
+        List<CompanyCompliance> allCCs = companyComplianceRepository.findAll().stream()
+                .filter(cc -> Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted())
+                .filter(cc -> cc.getStatus() != ComplianceStatus.COMPLETED && cc.getCompletedAt() == null)
+                .filter(cc -> cc.getStatus() != ComplianceStatus.EXEMPTED)
+                .collect(Collectors.toList());
+
+        for (CompanyCompliance cc : allCCs) {
+            if (isParentWithSubCompliances(cc)) {
+                // Parent containers are synced in second pass
+                continue;
+            }
+
+            ComplianceConfig config = cc.getConfig();
+            if (config == null) {
+                config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
+            }
+            if (config == null && cc.getSubTemplate() != null) {
+                config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+            }
+            if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
+                config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+            }
+            if (config == null) continue;
+
+            // Check if completed via employee assignments
+            if (assignmentRepository.isConfigCompletedByAnyEmployee(config.getId())) {
+                cc.setStatus(ComplianceStatus.COMPLETED);
+                companyComplianceRepository.save(cc);
+                continue;
+            }
+
+            LocalDate due;
+            if (config.getFrequency() == ComplianceFrequency.ONE_TIME) {
+                due = config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate();
+            } else if (config.getFrequency() != null) {
+                due = calculateEffectiveDueDate(config);
+            } else {
+                due = config.getDueDate() != null ? config.getDueDate() : config.getCustomDueDate();
+            }
+
+            if (due != null) {
+                if (due.isBefore(today)) {
+                    if (cc.getStatus() != ComplianceStatus.OVERDUE) {
+                        cc.setStatus(ComplianceStatus.OVERDUE);
+                        companyComplianceRepository.save(cc);
+                    }
+                } else if (cc.getStatus() == ComplianceStatus.OVERDUE) {
+                    cc.setStatus(ComplianceStatus.IN_PROGRESS);
+                    companyComplianceRepository.save(cc);
+                }
+            }
+        }
+
+        // Second pass: sync parent container compliances based on sub-compliances
+        List<CompanyCompliance> parents = allCCs.stream()
+                .filter(this::isParentWithSubCompliances)
+                .collect(Collectors.toList());
+
+        for (CompanyCompliance p : parents) {
+            if (p.getCompany() != null && p.getTemplate() != null) {
+                List<CompanyCompliance> subs = companyComplianceRepository
+                        .findSubCompliancesByCompanyIdAndParentTemplateId(p.getCompany().getId(), p.getTemplate().getId());
+                if (subs != null && !subs.isEmpty()) {
+                    boolean allCompleted = subs.stream().allMatch(s -> s.getStatus() == ComplianceStatus.COMPLETED || s.getCompletedAt() != null);
+                    boolean anyOverdue = subs.stream().anyMatch(s -> s.getStatus() == ComplianceStatus.OVERDUE);
+                    boolean anyInProgress = subs.stream().anyMatch(s -> s.getStatus() == ComplianceStatus.IN_PROGRESS || s.getStatus() == ComplianceStatus.COMPLETED || s.getCompletedAt() != null);
+
+                    if (allCompleted) {
+                        p.setStatus(ComplianceStatus.COMPLETED);
+                        companyComplianceRepository.save(p);
+                    } else if (anyOverdue) {
+                        if (p.getStatus() != ComplianceStatus.OVERDUE) {
+                            p.setStatus(ComplianceStatus.OVERDUE);
+                            companyComplianceRepository.save(p);
+                        }
+                    } else if (anyInProgress) {
+                        if (p.getStatus() != ComplianceStatus.IN_PROGRESS) {
+                            p.setStatus(ComplianceStatus.IN_PROGRESS);
+                            companyComplianceRepository.save(p);
+                        }
+                    } else {
+                        if (p.getStatus() != ComplianceStatus.PENDING) {
+                            p.setStatus(ComplianceStatus.PENDING);
+                            companyComplianceRepository.save(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getOverdueCompliancesForDashboard() {
+        // Step 1: lightweight paginated query (no JOIN FETCH)
+        Page<CompanyCompliance> page = companyComplianceRepository
+                .findOverdueAssignmentsFiltered(null, null, true, null,
+                        PageRequest.of(0, 50, Sort.by(Sort.Direction.ASC, "createdAt")));
+
+        List<Long> ids = page.getContent().stream().map(CompanyCompliance::getId).collect(Collectors.toList());
+        if (ids.isEmpty()) return new ArrayList<>();
+
+        // Step 2: load full entity graph for only these IDs
+        List<CompanyCompliance> fullList = companyComplianceRepository.fetchByIds(ids);
+        Map<Long, CompanyCompliance> byId = new java.util.LinkedHashMap<>();
+        fullList.forEach(cc -> byId.put(cc.getId(), cc));
+
+        LocalDate today = LocalDate.now(IST_ZONE);
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (Long id : ids) {
+            CompanyCompliance cc = byId.get(id);
+            if (cc == null) continue;
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", cc.getId());
+            map.put("companyId", cc.getCompany() != null ? cc.getCompany().getId() : null);
+            map.put("companyName", cc.getCompany() != null ? cc.getCompany().getName() : "N/A");
+            map.put("templateId", cc.getTemplate() != null ? cc.getTemplate().getId() : null);
+            map.put("templateName", cc.getTemplate() != null ? cc.getTemplate().getName() : "Compliance");
+            map.put("subTemplateId", cc.getSubTemplate() != null ? cc.getSubTemplate().getId() : null);
+            map.put("subTemplateName", cc.getSubTemplate() != null ? cc.getSubTemplate().getName() : null);
+
+            LocalDate due = null;
+            if (cc.getConfig() != null) {
+                due = cc.getConfig().getDueDate() != null ? cc.getConfig().getDueDate() : cc.getConfig().getCustomDueDate();
+                if (due == null) due = calculateEffectiveDueDate(cc.getConfig());
+            }
+
+            if (due != null) {
+                map.put("dueDate", due.toString());
+                long overdueDays = Math.max(1, ChronoUnit.DAYS.between(due, today));
+                map.put("overdueDays", overdueDays);
+            } else {
+                map.put("dueDate", "—");
+                map.put("overdueDays", 1L);
+            }
+
+            map.put("status", "OVERDUE");
+            map.put("assignedByName", (cc.getCompany() != null && cc.getCompany().getCompanyAdmin() != null)
+                    ? cc.getCompany().getCompanyAdmin().getFullName() : "—");
+            result.add(map);
+        }
+
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public Page<Map<String, Object>> getOverdueCompaniesSummary(String search, Pageable pageable) {
+        String cleanSearch = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
+        Page<Object[]> rawPage = companyComplianceRepository.findOverdueCompaniesSummary(cleanSearch, pageable);
+
+        LocalDate today = LocalDate.now(IST_ZONE);
+        List<Map<String, Object>> list = new ArrayList<>();
+
+        for (Object[] row : rawPage.getContent()) {
+            if (row != null && row.length >= 4) {
+                Map<String, Object> item = new HashMap<>();
+                item.put("companyId", row[0]);
+                item.put("companyName", row[1]);
+                item.put("email", row[2]);
+                item.put("overdueCount", row[3]);
+
+                LocalDate oldestDueDate = (row.length > 4 && row[4] instanceof LocalDate) ? (LocalDate) row[4] : null;
+                item.put("oldestDueDate", oldestDueDate != null ? oldestDueDate.toString() : null);
+                item.put("maxOverdueDays", oldestDueDate != null ? Math.max(1, ChronoUnit.DAYS.between(oldestDueDate, today)) : 0);
+
+                list.add(item);
+            }
+        }
+
+        return new PageImpl<>(list, pageable, rawPage.getTotalElements());
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getDashboardStatsSummary() {
+        Map<String, Object> stats = new HashMap<>();
+
+        long totalCompanies = companyRepository.countActiveCompanies();
+        long activeCompanies = companyRepository.countByStatus(CompanyStatus.ACTIVE);
+        long deactivatedCompanies = companyRepository.countByStatus(CompanyStatus.DEACTIVATED);
+        long totalTemplates = templateRepository.countByIsCompanySpecificFalseAndIsActiveTrue();
+        long totalAssignments = companyComplianceRepository.countTotalActiveAssignments();
+
+        List<Object[]> statusCounts = companyComplianceRepository.countAssignmentsGroupedByStatus();
+        long overdueCount = companyComplianceRepository.countOverdueActiveAssignments();
+        long completedCount = 0;
+        long pendingCount = 0;
+        long inProgressCount = 0;
+
+        for (Object[] row : statusCounts) {
+            if (row != null && row.length >= 2) {
+                ComplianceStatus st = (ComplianceStatus) row[0];
+                Number cnt = (Number) row[1];
+                if (st != null && cnt != null) {
+                    switch (st) {
+                        case COMPLETED -> completedCount += cnt.longValue();
+                        case PENDING -> pendingCount += cnt.longValue();
+                        case IN_PROGRESS -> inProgressCount += cnt.longValue();
+                        default -> {}
+                    }
+                }
+            }
+        }
+
+        long totalStatus = overdueCount + completedCount + pendingCount + inProgressCount;
+        int avgRate = totalStatus > 0 ? (int) Math.round(((double) completedCount / totalStatus) * 100) : 0;
+
+        stats.put("totalCompanies", totalCompanies);
+        stats.put("activeCompanies", activeCompanies);
+        stats.put("deactivatedCompanies", deactivatedCompanies);
+        stats.put("totalCategories", totalTemplates);
+        stats.put("configuredCategories", totalTemplates);
+        stats.put("totalAssignments", totalAssignments);
+        stats.put("overdueCount", overdueCount);
+        stats.put("completedCount", completedCount);
+        stats.put("pendingCount", pendingCount + inProgressCount);
+        stats.put("inProgressCount", inProgressCount);
+        stats.put("avgCompletionRate", avgRate);
+
+        return stats;
+    }
+
     @Transactional(readOnly = true)
     public Page<CompanyComplianceDTO> getAllAssignments(Long companyId, ComplianceStatus status,
                                                         Long templateId, Boolean isActive,
                                                         Pageable pageable) {
-        log.info("Fetching compliance assignments - companyId: {}, status: {}, templateId: {}, isActive: {}",
-                companyId, status, templateId, isActive);
+        return getAllAssignments(companyId, status, templateId, isActive, null, pageable);
+    }
 
-        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
-        Page<CompanyCompliance> assignments = companyComplianceRepository
-                .findAllAssignmentsFiltered(companyId, status, templateId, isActive, unsorted);
+    @Transactional(readOnly = true)
+    public Page<CompanyComplianceDTO> getAllAssignments(Long companyId, ComplianceStatus status,
+                                                        Long templateId, Boolean isActive,
+                                                        String search,
+                                                        Pageable pageable) {
+        log.info("Fetching compliance assignments - companyId: {}, status: {}, templateId: {}, isActive: {}, search: {}",
+                companyId, status, templateId, isActive, search);
 
-        List<CompanyComplianceDTO> dtos = assignments.getContent().stream()
-                .map(this::convertToCompanyComplianceDTO)
+        String cleanSearch = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
+
+        // Step 1: lightweight paginated query (no JOIN FETCH — avoids Hibernate in-memory pagination)
+        Page<CompanyCompliance> assignmentsPage;
+        if (status == ComplianceStatus.OVERDUE) {
+            assignmentsPage = companyComplianceRepository
+                    .findOverdueAssignmentsFiltered(companyId, templateId, isActive, cleanSearch, pageable);
+        } else {
+            assignmentsPage = companyComplianceRepository
+                    .findAllAssignmentsFiltered(companyId, status, templateId, isActive, cleanSearch, pageable);
+        }
+
+        // Step 2: fetch full associations only for the small result set
+        List<Long> ids = assignmentsPage.getContent().stream().map(CompanyCompliance::getId).collect(Collectors.toList());
+        List<CompanyCompliance> fullEntities = ids.isEmpty()
+                ? new ArrayList<>()
+                : companyComplianceRepository.fetchByIds(ids);
+
+        // Maintain the original page order
+        Map<Long, CompanyCompliance> byId = new java.util.LinkedHashMap<>();
+        fullEntities.forEach(cc -> byId.put(cc.getId(), cc));
+
+        List<CompanyComplianceDTO> dtos = ids.stream()
+                .map(id -> byId.containsKey(id) ? convertToCompanyComplianceDTO(byId.get(id)) : null)
+                .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toList());
 
-        return new PageImpl<>(dtos, pageable, assignments.getTotalElements());
+        return new PageImpl<>(dtos, pageable, assignmentsPage.getTotalElements());
     }
 
     @Transactional(readOnly = true)
     public Page<CompanyComplianceDTO> getCompliancesByCompany(Long companyId, Pageable pageable) {
         log.info("Fetching compliances for company: {}", companyId);
 
-        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
-        Page<CompanyCompliance> compliances = companyComplianceRepository
-                .findAllAssignmentsFiltered(companyId, null, null, true, unsorted);
+        // Step 1: lightweight paginated query
+        Page<CompanyCompliance> page = companyComplianceRepository
+                .findAllAssignmentsFiltered(companyId, null, null, true, null, pageable);
 
-        List<CompanyComplianceDTO> dtos = compliances.getContent().stream()
-                .map(this::convertToCompanyComplianceDTO)
+        // Step 2: fetch full entity graph for paginated IDs only
+        List<Long> ids = page.getContent().stream().map(CompanyCompliance::getId).collect(Collectors.toList());
+        List<CompanyCompliance> full = ids.isEmpty()
+                ? new ArrayList<>()
+                : companyComplianceRepository.fetchByIds(ids);
+
+        Map<Long, CompanyCompliance> byId = new java.util.LinkedHashMap<>();
+        full.forEach(cc -> byId.put(cc.getId(), cc));
+
+        List<CompanyComplianceDTO> dtos = ids.stream()
+                .map(id -> byId.containsKey(id) ? convertToCompanyComplianceDTO(byId.get(id)) : null)
+                .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toList());
 
-        return new PageImpl<>(dtos, pageable, compliances.getTotalElements());
+        return new PageImpl<>(dtos, pageable, page.getTotalElements());
     }
 
     @Transactional(readOnly = true)
@@ -2887,8 +3244,17 @@ if (parentCC == null) {
 
     @Transactional(readOnly = true)
     public Page<ComplianceTemplateSummaryDTO> getSuperAdminTemplatesWithStats(Pageable pageable) {
-        Page<ComplianceTemplate> templatePage = templateRepository
-                .findByIsCompanySpecificFalseAndIsActiveTrueOrderByPriorityAsc(pageable);
+        return getSuperAdminTemplatesWithStats(null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ComplianceTemplateSummaryDTO> getSuperAdminTemplatesWithStats(String search, Pageable pageable) {
+        Page<ComplianceTemplate> templatePage;
+        if (search != null && !search.trim().isEmpty()) {
+            templatePage = templateRepository.searchSuperAdminTemplates(search.trim(), pageable);
+        } else {
+            templatePage = templateRepository.findByIsCompanySpecificFalseAndIsActiveTrueOrderByPriorityAsc(pageable);
+        }
         List<ComplianceTemplate> templates = templatePage.getContent();
 
         if (templates.isEmpty()) {
@@ -3271,7 +3637,9 @@ if (parentCC == null) {
             dto.setRepeatReminder(config.getRepeatReminder());
             dto.setReminderIntervalDays(config.getReminderIntervalDays());
 
-            LocalDate effectiveDueDate = calculateEffectiveDueDate(config);
+            LocalDate effectiveDueDate = (config.getFrequency() == ComplianceFrequency.ONE_TIME)
+                    ? (config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate())
+                    : calculateEffectiveDueDate(config);
             dto.setEffectiveDueDate(effectiveDueDate);
             if (effectiveDueDate != null) {
                 dto.setDueDate(effectiveDueDate);
@@ -3308,8 +3676,19 @@ if (parentCC == null) {
             dto.setCompanyId(config.getCompanyCompliance().getCompany().getId());
             dto.setCompanyName(config.getCompanyCompliance().getCompany().getName());
 
-            if (config.getCompanyCompliance().getStatus() != null) {
-                dto.setStatus(config.getCompanyCompliance().getStatus());
+            ComplianceStatus actualStatus = config.getCompanyCompliance().getStatus();
+            if (actualStatus != ComplianceStatus.COMPLETED && config.getCompanyCompliance().getCompletedAt() == null) {
+                LocalDate effDue = dto.getEffectiveDueDate();
+                if (effDue != null) {
+                    if (effDue.isBefore(LocalDate.now(IST_ZONE))) {
+                        actualStatus = ComplianceStatus.OVERDUE;
+                    } else if (actualStatus == ComplianceStatus.OVERDUE) {
+                        actualStatus = ComplianceStatus.IN_PROGRESS;
+                    }
+                }
+            }
+            if (actualStatus != null) {
+                dto.setStatus(actualStatus);
             }
 
             if (config.getCompanyCompliance().getTemplate() != null) {
@@ -3354,128 +3733,56 @@ if (parentCC == null) {
             dto.setEditableForCompanies(cc.getTemplate().isEditable());
         }
 
+        if (cc.getSubTemplate() != null) {
+            dto.setSubTemplateId(cc.getSubTemplate().getId());
+            dto.setSubTemplateName(cc.getSubTemplate().getName());
+        }
+
         dto.setIsParent(cc.isParent());
-        dto.setStatus(cc.getStatus());
         dto.setAssignedAt(cc.getCreatedAt());
         dto.setNotes(cc.getAdminNotes());
 
-        if (cc.getCreatedBy() != null) {
-            userRepository.findById(cc.getCreatedBy()).ifPresent(user -> {
-                dto.setAssignedByName(user.getFirstName() + " " + user.getLastName());
-            });
+        ComplianceConfig config = cc.getConfig();
+        if (config == null) {
+            config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
         }
-
-        Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(cc.getId());
-        boolean isConfigured = configOpt.isPresent();
+        boolean isConfigured = config != null;
         dto.setConfigured(isConfigured);
 
         ComplianceStatus status = cc.getStatus() != null ? cc.getStatus() : ComplianceStatus.PENDING;
         LocalDateTime completedAt = cc.getCompletedAt();
         String submissionReference = cc.getAdminSubmissionReference();
         String submissionDocumentUrl = cc.getAdminSubmissionDocumentUrl();
-        String completedByName = null;
 
-        if (cc.getCompletedBy() != null) {
-            userRepository.findById(cc.getCompletedBy()).ifPresent(user ->
-                    dto.setCompletedByName(user.getFullName())
-            );
-            completedByName = dto.getCompletedByName();
-        }
+        if (config != null && config.getFrequency() != null) {
+            dto.setFrequency(config.getFrequency().name());
+            LocalDate effectiveDueDate = (config.getFrequency() == ComplianceFrequency.ONE_TIME)
+                    ? (config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate())
+                    : calculateEffectiveDueDate(config);
+            dto.setEffectiveDueDate(effectiveDueDate);
+            dto.setDueDate(effectiveDueDate);
 
-        if (configOpt.isPresent()) {
-            ComplianceConfig config = configOpt.get();
-            if (config.getFrequency() != null) {
-                dto.setFrequency(config.getFrequency().name());
-
-                LocalDate effectiveDueDate = calculateEffectiveDueDate(config);
-                dto.setEffectiveDueDate(effectiveDueDate);
-                dto.setDueDate(effectiveDueDate);
-
-                // Check active employee assignments for completion
-                Optional<EmployeeAssignment> completedAssignment = assignmentRepository
-                        .findByConfigIdAndIsActiveTrue(config.getId())
-                        .stream().filter(a -> a.getCompletedAt() != null).findFirst();
-
-                if (completedAssignment.isPresent()) {
-                    EmployeeAssignment a = completedAssignment.get();
-                    status = ComplianceStatus.COMPLETED;
-                    completedAt = a.getCompletedAt();
-                    if (a.getSubmissionReference() != null) submissionReference = a.getSubmissionReference();
-                    if (a.getSubmissionDocumentUrl() != null) submissionDocumentUrl = a.getSubmissionDocumentUrl();
-
-                    if (a.getCompletedBy() != null) {
-                        User u = userRepository.findById(a.getCompletedBy()).orElse(null);
-                        if (u != null) completedByName = u.getFullName();
-                    } else if (a.getEmployeeId() != null) {
-                        User u = userRepository.findById(a.getEmployeeId()).orElse(null);
-                        if (u != null) completedByName = u.getFullName();
+            if (status != ComplianceStatus.COMPLETED && completedAt == null) {
+                if (effectiveDueDate != null) {
+                    if (effectiveDueDate.isBefore(LocalDate.now(IST_ZONE))) {
+                        status = ComplianceStatus.OVERDUE;
+                    } else if (status == ComplianceStatus.OVERDUE) {
+                        status = ComplianceStatus.IN_PROGRESS;
                     }
-
-                    if (cc.getStatus() != ComplianceStatus.COMPLETED) {
-                        cc.setStatus(ComplianceStatus.COMPLETED);
-                        cc.setCompletedAt(completedAt);
-                        if (a.getCompletedBy() != null) cc.setCompletedBy(a.getCompletedBy());
-                        companyComplianceRepository.save(cc);
-                    }
-                } else if (cc.getStatus() == ComplianceStatus.COMPLETED || cc.getCompletedAt() != null) {
-                    status = ComplianceStatus.COMPLETED;
-                    if (cc.getStatus() != ComplianceStatus.COMPLETED) {
-                        cc.setStatus(ComplianceStatus.COMPLETED);
-                        companyComplianceRepository.save(cc);
-                    }
-                } else if (effectiveDueDate != null && effectiveDueDate.isBefore(LocalDate.now())) {
-                    status = ComplianceStatus.OVERDUE;
                 }
-
-                if (status == ComplianceStatus.COMPLETED) {
-                    LocalDate nextDueDate = getNextDueDateForCompliance(cc);
-                    dto.setNextDueDate(nextDueDate);
-                } else {
-                    dto.setNextDueDate(effectiveDueDate);
-                }
-            } else {
-                dto.setFrequency(null);
-                dto.setEffectiveDueDate(null);
-                dto.setDueDate(null);
-                dto.setNextDueDate(null);
             }
-        } else {
-            dto.setFrequency(null);
-            dto.setEffectiveDueDate(null);
-            dto.setDueDate(null);
-            dto.setNextDueDate(null);
+
+            if (status == ComplianceStatus.COMPLETED) {
+                LocalDate nextDueDate = getNextDueDateForCompliance(cc);
+                dto.setNextDueDate(nextDueDate);
+            } else {
+                dto.setNextDueDate(effectiveDueDate);
+            }
         }
 
-        if (cc.getStatus() == ComplianceStatus.COMPLETED || cc.getCompletedAt() != null) {
+        if (status == ComplianceStatus.COMPLETED || completedAt != null) {
             status = ComplianceStatus.COMPLETED;
             if (completedAt == null) completedAt = cc.getCompletedAt() != null ? cc.getCompletedAt() : cc.getUpdatedAt();
-        }
-
-        // If it's a parent compliance with sub-compliances, compute parent status based on sub-compliances
-        if (cc.isParent() && cc.getCompany() != null && cc.getTemplate() != null) {
-            List<CompanyCompliance> subCCs = companyComplianceRepository
-                    .findSubCompliancesByCompanyIdAndParentTemplateId(cc.getCompany().getId(), cc.getTemplate().getId());
-            if (subCCs != null && !subCCs.isEmpty()) {
-                boolean allSubsCompleted = subCCs.stream().allMatch(s -> s.getStatus() == ComplianceStatus.COMPLETED || s.getCompletedAt() != null);
-                boolean anySubOverdue = subCCs.stream().anyMatch(s -> s.getStatus() == ComplianceStatus.OVERDUE);
-                boolean anySubInProgress = subCCs.stream().anyMatch(s -> s.getStatus() == ComplianceStatus.IN_PROGRESS || s.getStatus() == ComplianceStatus.COMPLETED || s.getCompletedAt() != null);
-
-                if (allSubsCompleted) {
-                    status = ComplianceStatus.COMPLETED;
-                    completedAt = subCCs.stream().map(CompanyCompliance::getCompletedAt).filter(Objects::nonNull).max(LocalDateTime::compareTo).orElse(cc.getCompletedAt());
-                } else if (anySubOverdue) {
-                    status = ComplianceStatus.OVERDUE;
-                } else if (anySubInProgress) {
-                    status = ComplianceStatus.IN_PROGRESS;
-                } else {
-                    status = ComplianceStatus.PENDING;
-                }
-            }
-        }
-
-        if (cc.getSubTemplate() != null) {
-            dto.setSubTemplateId(cc.getSubTemplate().getId());
-            dto.setSubTemplateName(cc.getSubTemplate().getName());
         }
 
         dto.setStatus(status);
@@ -3484,7 +3791,7 @@ if (parentCC == null) {
 
         if (status == ComplianceStatus.COMPLETED) {
             dto.setCompletedAt(completedAt != null ? completedAt : cc.getUpdatedAt());
-            dto.setCompletedByName(completedByName != null ? completedByName : "Company Admin");
+            dto.setCompletedByName("Company Admin");
         } else {
             dto.setCompletedAt(null);
             dto.setCompletedByName(null);

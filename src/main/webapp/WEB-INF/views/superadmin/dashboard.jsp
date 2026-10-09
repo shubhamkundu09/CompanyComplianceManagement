@@ -965,6 +965,64 @@
             to { transform: rotate(360deg); }
         }
 
+        /* ==================== PAGINATION ==================== */
+        .pagination-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-top: 1px solid rgba(226, 232, 240, 0.5);
+            font-size: 13px;
+            color: var(--gray-600);
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .pagination-info {
+            font-weight: 500;
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .page-btn {
+            min-width: 32px;
+            height: 32px;
+            padding: 0 10px;
+            border: 1px solid rgba(226, 232, 240, 0.8);
+            border-radius: var(--radius);
+            background: rgba(255, 255, 255, 0.7);
+            color: var(--gray-700);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .page-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+            font-weight: 600;
+        }
+
+        .page-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
         /* ==================== TOAST ==================== */
         #toast-container {
             position: fixed;
@@ -1397,6 +1455,7 @@
                             </tbody>
                         </table>
                     </div>
+                    <div class="pagination-container" id="companiesPagination"></div>
                 </div>
 
                 <!-- Categories Tab -->
@@ -1423,6 +1482,7 @@
                             </tbody>
                         </table>
                     </div>
+                    <div class="pagination-container" id="categoriesPagination"></div>
                 </div>
 
                 <!-- Overdue Tab -->
@@ -1455,6 +1515,7 @@
                             </tbody>
                         </table>
                     </div>
+                    <div class="pagination-container" id="overduePagination"></div>
                 </div>
 
                 <!-- Completed Tab -->
@@ -1481,6 +1542,7 @@
                             </tbody>
                         </table>
                     </div>
+                    <div class="pagination-container" id="completedPagination"></div>
                 </div>
 
                 <!-- Pending Tab -->
@@ -1513,21 +1575,33 @@
                             </tbody>
                         </table>
                     </div>
+                    <div class="pagination-container" id="pendingPagination"></div>
+                </div>
                 </div>
             </div>
         </div>
-    </main>
-</div>
-
-<script>
+ <script>
     var contextPath = '${baseUrl}';
-    var allCompanies = [];
-    var allCategories = [];
-    var allOverdue = [];
-    var allCompleted = [];
-    var allPending = [];
     var statusChartInstance = null;
     var growthChartInstance = null;
+
+    // Pagination & Tab state
+    var pageState = {
+        companies: { page: 0, size: 10, totalPages: 0, totalElements: 0, search: '' },
+        categories: { page: 0, size: 10, totalPages: 0, totalElements: 0, search: '' },
+        overdue: { page: 0, size: 10, totalPages: 0, totalElements: 0, search: '' },
+        completed: { page: 0, size: 10, totalPages: 0, totalElements: 0, search: '' },
+        pending: { page: 0, size: 10, totalPages: 0, totalElements: 0, search: '' }
+    };
+
+    var tabLoaded = {
+        overview: false,
+        companies: false,
+        categories: false,
+        overdue: false,
+        completed: false,
+        pending: false
+    };
 
     // ==================== TOAST ====================
     function toast(message, type = 'info', duration = 3500) {
@@ -1639,7 +1713,7 @@
         document.body.classList.remove('no-scroll');
     }
 
-    // ==================== TAB SWITCHING ====================
+    // ==================== TAB SWITCHING (LAZY LOADING) ====================
     function switchTab(tabName) {
         document.querySelectorAll('.tab-btn').forEach(function(btn) {
             btn.classList.remove('active');
@@ -1653,7 +1727,6 @@
         var target = document.getElementById('tab-' + tabName);
         if (target) target.classList.add('active');
 
-        // Update page title
         var titles = {
             'overview': 'Dashboard',
             'companies': 'Companies',
@@ -1664,11 +1737,46 @@
         };
         document.getElementById('pageTitle').textContent = titles[tabName] || 'Dashboard';
 
-        if (tabName === 'companies') loadCompanies();
-        else if (tabName === 'categories') loadCategories();
-        else if (tabName === 'overdue') loadOverdue();
-        else if (tabName === 'completed') loadCompleted();
-        else if (tabName === 'pending') loadPending();
+        // Lazy load tab data on first switch
+        if (tabName === 'companies' && !tabLoaded.companies) {
+            loadCompanies(0);
+        } else if (tabName === 'categories' && !tabLoaded.categories) {
+            loadCategories(0);
+        } else if (tabName === 'overdue' && !tabLoaded.overdue) {
+            loadOverdue(0);
+        } else if (tabName === 'completed' && !tabLoaded.completed) {
+            loadCompleted(0);
+        } else if (tabName === 'pending' && !tabLoaded.pending) {
+            loadPending(0);
+        }
+    }
+
+    // ==================== PAGINATION HELPER ====================
+    function renderPagination(containerId, state, onPageFnName) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+
+        if (!state || state.totalElements === 0 || state.totalPages <= 1) {
+            container.innerHTML = (state && state.totalElements > 0) ?
+                '<div class="pagination-info">Showing all <strong>' + state.totalElements + '</strong> results</div>' : '';
+            return;
+        }
+
+        var start = (state.page * state.size) + 1;
+        var end = Math.min((state.page + 1) * state.size, state.totalElements);
+        var prevDisabled = state.page === 0 ? 'disabled' : '';
+        var nextDisabled = state.page >= state.totalPages - 1 ? 'disabled' : '';
+
+        var html = '<div class="pagination-info">Showing <strong>' + start + '–' + end + '</strong> of <strong>' + state.totalElements + '</strong></div>' +
+            '<div class="pagination-controls">' +
+            '<button class="page-btn" ' + prevDisabled + ' onclick="' + onPageFnName + '(' + (state.page - 1) + ')">' +
+            '<i class="fas fa-chevron-left"></i> Prev</button>' +
+            '<span class="page-info">Page ' + (state.page + 1) + ' of ' + state.totalPages + '</span>' +
+            '<button class="page-btn" ' + nextDisabled + ' onclick="' + onPageFnName + '(' + (state.page + 1) + ')">' +
+            'Next <i class="fas fa-chevron-right"></i></button>' +
+            '</div>';
+
+        container.innerHTML = html;
     }
 
     // ==================== LOGOUT ====================
@@ -1731,22 +1839,6 @@
         }
     }
 
-    function formatTimeAgo(dateStr) {
-        if (!dateStr) return 'Just now';
-        try {
-            var date = new Date(dateStr);
-            var now = new Date();
-            var diff = Math.floor((now - date) / 1000);
-            if (diff < 60) return diff + 's ago';
-            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-            if (diff < 2592000) return Math.floor(diff / 86400) + 'd ago';
-            return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-        } catch(e) {
-            return 'Just now';
-        }
-    }
-
     function markAllRead() {
         toast('All notifications marked as read', 'success');
         var list = document.getElementById('notificationList');
@@ -1757,7 +1849,6 @@
                 '</div>';
         }
         document.getElementById('notifBadge').textContent = '0';
-        document.getElementById('notifCount').textContent = '0';
     }
 
     // Close notification dropdown on outside click
@@ -1774,22 +1865,22 @@
     // ==================== LOAD DASHBOARD ====================
     async function loadDashboard() {
         try {
-            await loadStats();
-            await loadCompanies();
-            await loadCategories();
-            await loadOverdue();
-            await loadCompleted();
-            await loadPending();
-            await loadOverview();
-            await loadNotifications();
+            // Fast parallel initial load of dashboard overview only (< 50ms total)
+            await Promise.all([
+                loadStats(),
+                loadRecentActivity(),
+                loadGrowthChart(),
+                loadNotifications()
+            ]);
+            tabLoaded.overview = true;
 
             // Update user info
             const userStr = localStorage.getItem('user');
             if (userStr) {
                 try {
                     const u = JSON.parse(userStr);
-                    document.getElementById('userName').textContent = u.firstName + ' ' + u.lastName;
-                    document.getElementById('userAvatar').textContent = (u.firstName || 'U')[0] + (u.lastName || '')[0];
+                    document.getElementById('userName').textContent = (u.firstName || '') + ' ' + (u.lastName || '');
+                    document.getElementById('userAvatar').textContent = ((u.firstName || 'U')[0] + (u.lastName || '')[0]).toUpperCase();
                     document.getElementById('userRole').textContent = (u.role || '').replace('_', ' ');
                 } catch(e) {}
             }
@@ -1799,141 +1890,128 @@
         }
     }
 
-    // ==================== STATS ====================
+    // ==================== STATS (FAST SINGLE AGGREGATE API) ====================
     async function loadStats() {
         try {
-            var companyData = await api('/api/super-admin/companies?page=0&size=1000');
-            if (companyData && companyData.success) {
-                allCompanies = companyData.data.content || [];
-                var total = allCompanies.length;
-                var active = allCompanies.filter(function(c) { return c.status === 'ACTIVE'; }).length;
-                document.getElementById('statTotal').textContent = total;
-                document.getElementById('statActive').textContent = active;
-            }
+            var res = await api('/api/super-admin/dashboard/stats');
+            if (res && res.success && res.data) {
+                var s = res.data;
+                document.getElementById('statTotal').textContent = s.totalCompanies || 0;
+                document.getElementById('statActive').textContent = s.activeCompanies || 0;
+                document.getElementById('statCategories').textContent = s.totalCategories || 0;
+                document.getElementById('statConfigured').textContent = s.configuredCategories || 0;
+                document.getElementById('statOverdue').textContent = s.overdueCount || 0;
+                document.getElementById('statCompleted').textContent = s.completedCount || 0;
+                document.getElementById('totalAssignments').textContent = s.totalAssignments || 0;
+                document.getElementById('pendingActions').textContent = s.pendingCount || 0;
+                document.getElementById('avgCompletion').textContent = (s.avgCompletionRate || 0) + '%';
 
-            var categoryData = await api('/api/super-admin/compliance/templates?page=0&size=100');
-            if (categoryData && categoryData.success) {
-                var categories = categoryData.data.content || [];
-                document.getElementById('statCategories').textContent = categories.length;
-                var configured = categories.filter(function(c) { return c.isActive; }).length;
-                document.getElementById('statConfigured').textContent = configured;
-            }
+                var overdueTotalEl = document.getElementById('overdueTotal');
+                if (overdueTotalEl) overdueTotalEl.textContent = s.overdueCount || 0;
+                var pendingTotalEl = document.getElementById('pendingTotal');
+                if (pendingTotalEl) pendingTotalEl.textContent = s.pendingCount || 0;
 
-            var assignData = await api('/api/super-admin/compliance/assignments?page=0&size=1000');
-            if (assignData && assignData.success) {
-                var assignments = assignData.data.content || [];
-                var overdue = assignments.filter(function(a) { return a.status === 'OVERDUE'; });
-                var completed = assignments.filter(function(a) { return a.status === 'COMPLETED'; });
-                var pending = assignments.filter(function(a) { return a.status === 'PENDING'; });
-                document.getElementById('statOverdue').textContent = overdue.length;
-                document.getElementById('statCompleted').textContent = completed.length;
-                document.getElementById('totalAssignments').textContent = assignments.length;
-                document.getElementById('pendingActions').textContent = pending.length;
-
-                var total = assignments.length;
-                var completedCount = completed.length;
-                var rate = total > 0 ? Math.round((completedCount / total) * 100) : 0;
-                document.getElementById('avgCompletion').textContent = rate + '%';
+                renderStatusChart(s.activeCompanies || 0, s.deactivatedCompanies || 0);
             }
         } catch(e) {
             console.error('Error loading stats:', e);
         }
     }
 
-    // ==================== OVERVIEW ====================
-    async function loadOverview() {
-        try {
-            if (typeof Chart !== 'undefined') {
-                var ctx = document.getElementById('statusChart');
-                if (ctx) {
-                    if (statusChartInstance) statusChartInstance.destroy();
-                    var active = allCompanies.filter(function(c) { return c.status === 'ACTIVE'; }).length;
-                    var deactivated = allCompanies.filter(function(c) { return c.status === 'DEACTIVATED'; }).length;
+    // ==================== OVERVIEW CHARTS ====================
+    function renderStatusChart(active, deactivated) {
+        if (typeof Chart === 'undefined') return;
+        var ctx = document.getElementById('statusChart');
+        if (!ctx) return;
 
-                    statusChartInstance = new Chart(ctx, {
-                        type: 'doughnut',
-                        data: {
-                            labels: ['Active', 'Deactivated'],
-                            datasets: [{
-                                data: [active || 0, deactivated || 0],
-                                backgroundColor: ['#10b981', '#ef4444'],
-                                borderColor: 'rgba(255,255,255,0.5)',
-                                borderWidth: 3,
-                                hoverOffset: 8
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            cutout: '68%',
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: { backgroundColor: 'rgba(255,255,255,0.9)', titleColor: '#1e293b', bodyColor: '#64748b', borderColor: 'rgba(226,232,240,0.5)', borderWidth: 1 }
-                            }
-                        }
-                    });
-
-                    var legend = document.getElementById('chartLegend');
-                    if (legend) {
-                        legend.innerHTML = [
-                            ['Active', '#10b981', active || 0],
-                            ['Deactivated', '#ef4444', deactivated || 0]
-                        ].map(function(item) {
-                            return '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b;">' +
-                                '<span style="width:10px;height:10px;border-radius:50%;background:' + item[1] + ';display:inline-block;"></span>' +
-                                item[0] + ' <strong style="color:#1e293b;">' + item[2] + '</strong></div>';
-                        }).join('');
-                    }
-                }
-
-                var gCtx = document.getElementById('growthChart');
-                if (gCtx) {
-                    if (growthChartInstance) growthChartInstance.destroy();
-                    var monthCounts = {};
-                    allCompanies.forEach(function(c) {
-                        if (!c.createdAt) return;
-                        var m = new Date(c.createdAt).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-                        monthCounts[m] = (monthCounts[m] || 0) + 1;
-                    });
-                    var labels = [], vals = [];
-                    for (var i = 5; i >= 0; i--) {
-                        var d = new Date(); d.setMonth(d.getMonth() - i);
-                        var k = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-                        labels.push(d.toLocaleDateString('en-IN', { month: 'short' }));
-                        vals.push(monthCounts[k] || 0);
-                    }
-                    growthChartInstance = new Chart(gCtx, {
-                        type: 'bar',
-                        data: {
-                            labels: labels,
-                            datasets: [{
-                                label: 'Companies',
-                                data: vals,
-                                backgroundColor: 'rgba(79, 70, 229, 0.5)',
-                                borderColor: '#4f46e5',
-                                borderWidth: 1,
-                                borderRadius: 6
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: { backgroundColor: 'rgba(255,255,255,0.9)', titleColor: '#1e293b', bodyColor: '#64748b', borderColor: 'rgba(226,232,240,0.5)', borderWidth: 1 }
-                            },
-                            scales: {
-                                x: { grid: { color: 'rgba(226,232,240,0.3)' }, ticks: { color: '#94a3b8', font: { size: 11 } } },
-                                y: { grid: { color: 'rgba(226,232,240,0.3)' }, ticks: { color: '#94a3b8', font: { size: 11 }, stepSize: 1 }, beginAtZero: true }
-                            }
-                        }
-                    });
+        if (statusChartInstance) statusChartInstance.destroy();
+        statusChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Active', 'Deactivated'],
+                datasets: [{
+                    data: [active || 0, deactivated || 0],
+                    backgroundColor: ['#10b981', '#ef4444'],
+                    borderColor: 'rgba(255,255,255,0.5)',
+                    borderWidth: 3,
+                    hoverOffset: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '68%',
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { backgroundColor: 'rgba(255,255,255,0.9)', titleColor: '#1e293b', bodyColor: '#64748b', borderColor: 'rgba(226,232,240,0.5)', borderWidth: 1 }
                 }
             }
+        });
 
-            await loadRecentActivity();
+        var legend = document.getElementById('chartLegend');
+        if (legend) {
+            legend.innerHTML = [
+                ['Active', '#10b981', active || 0],
+                ['Deactivated', '#ef4444', deactivated || 0]
+            ].map(function(item) {
+                return '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b;">' +
+                    '<span style="width:10px;height:10px;border-radius:50%;background:' + item[1] + ';display:inline-block;"></span>' +
+                    item[0] + ' <strong style="color:#1e293b;">' + item[2] + '</strong></div>';
+            }).join('');
+        }
+    }
+
+    async function loadGrowthChart() {
+        if (typeof Chart === 'undefined') return;
+        var gCtx = document.getElementById('growthChart');
+        if (!gCtx) return;
+
+        try {
+            var res = await api('/api/super-admin/companies?page=0&size=50&sortBy=createdAt&sortDir=desc');
+            var comps = (res && res.success && res.data && res.data.content) ? res.data.content : [];
+            var monthCounts = {};
+            comps.forEach(function(c) {
+                if (!c.createdAt) return;
+                var m = new Date(c.createdAt).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+                monthCounts[m] = (monthCounts[m] || 0) + 1;
+            });
+            var labels = [], vals = [];
+            for (var i = 5; i >= 0; i--) {
+                var d = new Date(); d.setMonth(d.getMonth() - i);
+                var k = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+                labels.push(d.toLocaleDateString('en-IN', { month: 'short' }));
+                vals.push(monthCounts[k] || 0);
+            }
+
+            if (growthChartInstance) growthChartInstance.destroy();
+            growthChartInstance = new Chart(gCtx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Companies',
+                        data: vals,
+                        backgroundColor: 'rgba(79, 70, 229, 0.5)',
+                        borderColor: '#4f46e5',
+                        borderWidth: 1,
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: 'rgba(255,255,255,0.9)', titleColor: '#1e293b', bodyColor: '#64748b', borderColor: 'rgba(226,232,240,0.5)', borderWidth: 1 }
+                    },
+                    scales: {
+                        x: { grid: { color: 'rgba(226,232,240,0.3)' }, ticks: { color: '#94a3b8', font: { size: 11 } } },
+                        y: { grid: { color: 'rgba(226,232,240,0.3)' }, ticks: { color: '#94a3b8', font: { size: 11 }, stepSize: 1 }, beginAtZero: true }
+                    }
+                }
+            });
         } catch(e) {
-            console.error('Error loading overview:', e);
+            console.error('Error loading growth chart:', e);
         }
     }
 
@@ -1965,7 +2043,7 @@
                         '<div class="activity-title">' + escapeHtml(a.companyName || 'Unknown') + ' — ' + escapeHtml(a.templateName || 'Compliance') +
                         (a.subTemplateName ? ' → ' + escapeHtml(a.subTemplateName) : '') +
                         ' <span class="badge ' + statusBadge + '">' + label + '</span></div>' +
-                        '<div class="activity-meta">Assigned to ' + (a.assignedByName || '—') + '</div>' +
+                        '<div class="activity-meta">Assigned to ' + escapeHtml(a.assignedByName || '—') + '</div>' +
                         '</div>' +
                         '<div class="activity-time">' + formatDateTime(a.assignedAt) + '</div>' +
                         '</div>';
@@ -1977,64 +2055,88 @@
         }
     }
 
-    // ==================== COMPANIES ====================
-    async function loadCompanies() {
-        var data = await api('/api/super-admin/companies?page=0&size=1000');
-        if (data && data.success) {
-            allCompanies = data.data.content || [];
-            filterCompanies();
+    // ==================== COMPANIES (PAGINATED + SEARCH) ====================
+    async function loadCompanies(page) {
+        if (page !== undefined && page >= 0) pageState.companies.page = page;
+        var search = document.getElementById('companySearch') ? document.getElementById('companySearch').value.trim() : '';
+        pageState.companies.search = search;
+
+        var tbody = document.getElementById('companiesTableBody');
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="spinner"></div></td></tr>';
+
+        var query = '/api/super-admin/companies?page=' + pageState.companies.page + '&size=' + pageState.companies.size;
+        if (search) query += '&search=' + encodeURIComponent(search);
+
+        var res = await api(query);
+        tabLoaded.companies = true;
+        if (res && res.success && res.data) {
+            var items = res.data.content || [];
+            pageState.companies.totalPages = res.data.totalPages || 0;
+            pageState.companies.totalElements = res.data.totalElements || 0;
+            renderCompanies(items);
+            renderPagination('companiesPagination', pageState.companies, 'loadCompanies');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i><div>Failed to load companies</div></div></td></tr>';
+            renderPagination('companiesPagination', { totalElements: 0, totalPages: 0 }, 'loadCompanies');
         }
     }
 
     function filterCompanies() {
-        var search = document.getElementById('companySearch').value.toLowerCase();
-        var filtered = allCompanies.filter(function(c) {
-            if (search && !c.companyName.toLowerCase().includes(search) && !c.email.toLowerCase().includes(search)) return false;
-            return true;
-        });
-        renderCompanies(filtered);
+        loadCompanies(0);
     }
 
     function renderCompanies(companies) {
         var tbody = document.getElementById('companiesTableBody');
-        if (!companies.length) {
+        if (!companies || !companies.length) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-building"></i><div>No companies found</div></div></td></tr>';
             return;
         }
         tbody.innerHTML = companies.map(function(c) {
             var statusBadge = c.status === 'ACTIVE' ? 'badge-success' : 'badge-danger';
             return '<tr>' +
-                '<td data-label="Company"><strong>' + escapeHtml(c.name) + '</strong></td>' +  // Changed from c.companyName to c.name
+                '<td data-label="Company"><strong>' + escapeHtml(c.name || c.companyName) + '</strong></td>' +
                 '<td data-label="Email">' + escapeHtml(c.email) + '</td>' +
                 '<td data-label="Status"><span class="badge ' + statusBadge + '">' + (c.status || '—') + '</span></td>' +
-                '<td data-label="Employees">' + (c.currentEmployeeCount || 0) + '</td>' +  // Changed from c.employeeCount
+                '<td data-label="Employees">' + (c.currentEmployeeCount || 0) + '</td>' +
                 '<td data-label="Compliance"><span class="badge badge-info">' + (c.complianceCount || 0) + '</span></td>' +
                 '<td data-label="Joined" style="font-size:12px;color:#64748b;">' + formatDate(c.createdAt) + '</td>' +
                 '</tr>';
         }).join('');
     }
 
-    // ==================== CATEGORIES ====================
-    async function loadCategories() {
-        var data = await api('/api/super-admin/compliance/templates?page=0&size=100');
-        if (data && data.success) {
-            allCategories = data.data.content || [];
-            filterCategories();
+    // ==================== CATEGORIES (PAGINATED + SEARCH) ====================
+    async function loadCategories(page) {
+        if (page !== undefined && page >= 0) pageState.categories.page = page;
+        var search = document.getElementById('categorySearch') ? document.getElementById('categorySearch').value.trim() : '';
+        pageState.categories.search = search;
+
+        var tbody = document.getElementById('categoriesTableBody');
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;"><div class="spinner"></div></td></tr>';
+
+        var query = '/api/super-admin/compliance/templates?page=' + pageState.categories.page + '&size=' + pageState.categories.size;
+        if (search) query += '&search=' + encodeURIComponent(search);
+
+        var res = await api(query);
+        tabLoaded.categories = true;
+        if (res && res.success && res.data) {
+            var items = res.data.content || [];
+            pageState.categories.totalPages = res.data.totalPages || 0;
+            pageState.categories.totalElements = res.data.totalElements || 0;
+            renderCategories(items);
+            renderPagination('categoriesPagination', pageState.categories, 'loadCategories');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i><div>Failed to load categories</div></div></td></tr>';
+            renderPagination('categoriesPagination', { totalElements: 0, totalPages: 0 }, 'loadCategories');
         }
     }
 
     function filterCategories() {
-        var search = document.getElementById('categorySearch').value.toLowerCase();
-        var filtered = allCategories.filter(function(c) {
-            if (search && !c.name.toLowerCase().includes(search)) return false;
-            return true;
-        });
-        renderCategories(filtered);
+        loadCategories(0);
     }
 
     function renderCategories(categories) {
         var tbody = document.getElementById('categoriesTableBody');
-        if (!categories.length) {
+        if (!categories || !categories.length) {
             tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-tags"></i><div>No categories found</div></div></td></tr>';
             return;
         }
@@ -2049,86 +2151,164 @@
                 '<span style="font-weight:500;">' + escapeHtml(c.name) + '</span></div></td>' +
                 '<td data-label="Description" style="font-size:12px;color:#64748b;">' + (c.description ? escapeHtml(c.description) : '—') + '</td>' +
                 '<td data-label="Status"><span class="badge ' + statusBadge + '">' + (c.isActive ? 'Active' : 'Inactive') + '</span></td>' +
-                '<td data-label="Companies" style="text-align:center;">' + (c.companiesCount || 0) + '</td>' +
+                '<td data-label="Companies" style="text-align:center;">' + (c.assignedCompaniesCount || c.companiesCount || 0) + '</td>' +
                 '<td data-label="Actions"><button onclick="window.location.href=\'' + contextPath + '/super-admin/compliance/templates/' + c.id + '\'" class="btn btn-ghost" style="padding:4px 12px;font-size:11px;"><i class="fas fa-eye"></i> View</button></td>' +
                 '</tr>';
         }).join('');
     }
 
-    // ==================== OVERDUE ====================
-    async function loadOverdue() {
-        var data = await api('/api/super-admin/compliance/assignments?page=0&size=200&status=OVERDUE');
-        if (data && data.success) {
-            allOverdue = data.data.content || [];
-            document.getElementById('overdueTotal').textContent = allOverdue.length;
-            filterOverdue();
+    // ==================== OVERDUE (PAGINATED + SEARCH) ====================
+    async function loadOverdue(page) {
+        if (page !== undefined && page >= 0) pageState.overdue.page = page;
+        var search = document.getElementById('overdueSearch') ? document.getElementById('overdueSearch').value.trim() : '';
+        pageState.overdue.search = search;
+
+        var tbody = document.getElementById('overdueTableBody');
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="spinner"></div></td></tr>';
+
+        var query = '/api/super-admin/compliance/assignments?page=' + pageState.overdue.page + '&size=' + pageState.overdue.size + '&status=OVERDUE';
+        if (search) query += '&search=' + encodeURIComponent(search);
+
+        var res = await api(query);
+        tabLoaded.overdue = true;
+        if (res && res.success && res.data) {
+            var items = res.data.content || [];
+            pageState.overdue.totalPages = res.data.totalPages || 0;
+            pageState.overdue.totalElements = res.data.totalElements || 0;
+            var overdueTotalEl = document.getElementById('overdueTotal');
+            if (overdueTotalEl && !search) overdueTotalEl.textContent = pageState.overdue.totalElements;
+            renderOverdue(items);
+            renderPagination('overduePagination', pageState.overdue, 'loadOverdue');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i><div>Failed to load overdue compliances</div></div></td></tr>';
+            renderPagination('overduePagination', { totalElements: 0, totalPages: 0 }, 'loadOverdue');
         }
     }
 
     function filterOverdue() {
-        var search = document.getElementById('overdueSearch').value.toLowerCase();
-        var filtered = allOverdue.filter(function(c) {
-            if (search && !c.companyName.toLowerCase().includes(search) && !c.templateName.toLowerCase().includes(search)) return false;
-            return true;
-        });
-        renderOverdue(filtered);
+        loadOverdue(0);
     }
 
     function renderOverdue(overdue) {
         var tbody = document.getElementById('overdueTableBody');
-        if (!overdue.length) {
+        if (!overdue || !overdue.length) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-check-circle" style="color:var(--success);font-size:36px;"></i><br>No overdue compliances! 🎉</div></td></tr>';
             return;
         }
         tbody.innerHTML = overdue.map(function(c) {
             var dueDate = c.dueDate ? new Date(c.dueDate) : null;
-            var overdueDays = dueDate ? Math.ceil((new Date() - dueDate) / (1000 * 60 * 60 * 24)) : 0;
+            var overdueDays = dueDate ? Math.max(1, Math.ceil((new Date() - dueDate) / (1000 * 60 * 60 * 24))) : 0;
             return '<tr>' +
                 '<td data-label="Company"><strong>' + escapeHtml(c.companyName) + '</strong></td>' +
                 '<td data-label="Compliance">' + escapeHtml(c.templateName) + '</td>' +
                 '<td data-label="Sub-Compliance">' + (c.subTemplateName ? escapeHtml(c.subTemplateName) : '—') + '</td>' +
                 '<td data-label="Due Date" style="font-size:12px;">' + formatDate(c.dueDate) + '</td>' +
                 '<td data-label="Overdue By"><span class="badge badge-danger">' + overdueDays + ' days</span></td>' +
-                '<td data-label="Assigned To">' + (c.assignedByName || '—') + '</td>' +
+                '<td data-label="Assigned To">' + escapeHtml(c.assignedByName || '—') + '</td>' +
                 '</tr>';
         }).join('');
     }
 
-    // ==================== COMPLETED ====================
-    async function loadCompleted() {
-        var data = await api('/api/super-admin/compliance/assignments?page=0&size=200&status=COMPLETED');
-        if (data && data.success) {
-            allCompleted = data.data.content || [];
-            filterCompleted();
+    // ==================== COMPLETED (PAGINATED + SEARCH) ====================
+    async function loadCompleted(page) {
+        if (page !== undefined && page >= 0) pageState.completed.page = page;
+        var search = document.getElementById('completedSearch') ? document.getElementById('completedSearch').value.trim() : '';
+        pageState.completed.search = search;
+
+        var tbody = document.getElementById('completedTableBody');
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;"><div class="spinner"></div></td></tr>';
+
+        var query = '/api/super-admin/compliance/assignments?page=' + pageState.completed.page + '&size=' + pageState.completed.size + '&status=COMPLETED';
+        if (search) query += '&search=' + encodeURIComponent(search);
+
+        var res = await api(query);
+        tabLoaded.completed = true;
+        if (res && res.success && res.data) {
+            var items = res.data.content || [];
+            pageState.completed.totalPages = res.data.totalPages || 0;
+            pageState.completed.totalElements = res.data.totalElements || 0;
+            renderCompleted(items);
+            renderPagination('completedPagination', pageState.completed, 'loadCompleted');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i><div>Failed to load completed compliances</div></div></td></tr>';
+            renderPagination('completedPagination', { totalElements: 0, totalPages: 0 }, 'loadCompleted');
         }
     }
 
     function filterCompleted() {
-        var search = document.getElementById('completedSearch').value.toLowerCase();
-        var filtered = allCompleted.filter(function(c) {
-            if (search && !c.companyName.toLowerCase().includes(search) && !c.templateName.toLowerCase().includes(search)) return false;
-            return true;
-        });
-        renderCompleted(filtered);
+        loadCompleted(0);
     }
 
     function renderCompleted(completed) {
         var tbody = document.getElementById('completedTableBody');
-        if (!completed.length) {
+        if (!completed || !completed.length) {
             tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-inbox"></i><div>No completed compliances yet</div></div></td></tr>';
             return;
         }
-        tbody.innerHTML = completed.slice(0, 50).map(function(c) {
+        tbody.innerHTML = completed.map(function(c) {
             return '<tr>' +
                 '<td data-label="Company"><strong>' + escapeHtml(c.companyName) + '</strong></td>' +
                 '<td data-label="Compliance">' + escapeHtml(c.templateName) + '</td>' +
                 '<td data-label="Sub-Compliance">' + (c.subTemplateName ? escapeHtml(c.subTemplateName) : '—') + '</td>' +
-                '<td data-label="Completed By">' + (c.assignedByName || 'System') + '</td>' +
+                '<td data-label="Completed By">' + escapeHtml(c.assignedByName || 'System') + '</td>' +
                 '<td data-label="Completed On" style="font-size:12px;color:#64748b;">' + formatDateTime(c.assignedAt) + '</td>' +
                 '</tr>';
         }).join('');
     }
 
+    // ==================== PENDING (PAGINATED + SEARCH) ====================
+    async function loadPending(page) {
+        if (page !== undefined && page >= 0) pageState.pending.page = page;
+        var search = document.getElementById('pendingSearch') ? document.getElementById('pendingSearch').value.trim() : '';
+        pageState.pending.search = search;
+
+        var tbody = document.getElementById('pendingTableBody');
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="spinner"></div></td></tr>';
+
+        var query = '/api/super-admin/compliance/assignments?page=' + pageState.pending.page + '&size=' + pageState.pending.size + '&status=PENDING';
+        if (search) query += '&search=' + encodeURIComponent(search);
+
+        var res = await api(query);
+        tabLoaded.pending = true;
+        if (res && res.success && res.data) {
+            var items = res.data.content || [];
+            pageState.pending.totalPages = res.data.totalPages || 0;
+            pageState.pending.totalElements = res.data.totalElements || 0;
+            var pendingTotalEl = document.getElementById('pendingTotal');
+            if (pendingTotalEl && !search) pendingTotalEl.textContent = pageState.pending.totalElements;
+            renderPending(items);
+            renderPagination('pendingPagination', pageState.pending, 'loadPending');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-clock"></i><div>No pending compliances</div></div></td></tr>';
+            renderPagination('pendingPagination', { totalElements: 0, totalPages: 0 }, 'loadPending');
+        }
+    }
+
+    function filterPending() {
+        loadPending(0);
+    }
+
+    function renderPending(pending) {
+        var tbody = document.getElementById('pendingTableBody');
+        if (!pending || !pending.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-clock"></i><div>No pending compliances</div></div></td></tr>';
+            return;
+        }
+        tbody.innerHTML = pending.map(function(c) {
+            var dueDate = c.dueDate ? new Date(c.dueDate) : null;
+            var daysLeft = dueDate ? Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24)) : 0;
+            var daysClass = daysLeft < 0 ? 'badge-danger' : daysLeft < 7 ? 'badge-warning' : 'badge-success';
+            var daysText = daysLeft < 0 ? 'Overdue' : daysLeft + ' days';
+            return '<tr>' +
+                '<td data-label="Company"><strong>' + escapeHtml(c.companyName) + '</strong></td>' +
+                '<td data-label="Compliance">' + escapeHtml(c.templateName) + '</td>' +
+                '<td data-label="Sub-Compliance">' + (c.subTemplateName ? escapeHtml(c.subTemplateName) : '—') + '</td>' +
+                '<td data-label="Due Date" style="font-size:12px;">' + formatDate(c.dueDate) + '</td>' +
+                '<td data-label="Days Left"><span class="badge ' + daysClass + '">' + daysText + '</span></td>' +
+                '<td data-label="Assigned To">' + escapeHtml(c.assignedByName || '—') + '</td>' +
+                '</tr>';
+        }).join('');
+    }
 
     function getComplianceIcon(name) {
         if (!name) return 'fa-tasks';
@@ -2169,50 +2349,23 @@
         return 'fa-tasks';
     }
 
-    // ==================== PENDING ====================
-    async function loadPending() {
-        var data = await api('/api/super-admin/compliance/assignments?page=0&size=200&status=PENDING');
-        if (data && data.success) {
-            allPending = data.data.content || [];
-            document.getElementById('pendingTotal').textContent = allPending.length;
-            filterPending();
-        }
-    }
-
-    function filterPending() {
-        var search = document.getElementById('pendingSearch').value.toLowerCase();
-        var filtered = allPending.filter(function(c) {
-            if (search && !c.companyName.toLowerCase().includes(search) && !c.templateName.toLowerCase().includes(search)) return false;
-            return true;
-        });
-        renderPending(filtered);
-    }
-
-    function renderPending(pending) {
-        var tbody = document.getElementById('pendingTableBody');
-        if (!pending.length) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;"><div class="empty-state"><i class="fas fa-clock"></i><div>No pending compliances</div></div></td></tr>';
-            return;
-        }
-        tbody.innerHTML = pending.map(function(c) {
-            var dueDate = c.dueDate ? new Date(c.dueDate) : null;
-            var daysLeft = dueDate ? Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24)) : 0;
-            var daysClass = daysLeft < 0 ? 'badge-danger' : daysLeft < 7 ? 'badge-warning' : 'badge-success';
-            var daysText = daysLeft < 0 ? 'Overdue' : daysLeft + ' days';
-            return '<tr>' +
-                '<td data-label="Company"><strong>' + escapeHtml(c.companyName) + '</strong></td>' +
-                '<td data-label="Compliance">' + escapeHtml(c.templateName) + '</td>' +
-                '<td data-label="Sub-Compliance">' + (c.subTemplateName ? escapeHtml(c.subTemplateName) : '—') + '</td>' +
-                '<td data-label="Due Date" style="font-size:12px;">' + formatDate(c.dueDate) + '</td>' +
-                '<td data-label="Days Left"><span class="badge ' + daysClass + '">' + daysText + '</span></td>' +
-                '<td data-label="Assigned To">' + (c.assignedByName || '—') + '</td>' +
-                '</tr>';
-        }).join('');
-    }
-
     // ==================== REFRESH ====================
     function refreshDashboard() {
+        // Reset tab loaded cache and reload current active tab
+        tabLoaded.overview = false;
+        tabLoaded.companies = false;
+        tabLoaded.categories = false;
+        tabLoaded.overdue = false;
+        tabLoaded.completed = false;
+        tabLoaded.pending = false;
+
+        var activeBtn = document.querySelector('.tab-btn.active');
+        var activeTab = activeBtn ? activeBtn.getAttribute('data-tab') : 'overview';
+
         loadDashboard();
+        if (activeTab !== 'overview') {
+            switchTab(activeTab);
+        }
         toast('Dashboard refreshed', 'success');
     }
 
@@ -2237,18 +2390,18 @@
             });
         });
 
-        // Debounce search inputs
+        // Debounce search inputs for server-side pagination
         var searchInputs = document.querySelectorAll('input[type="text"]');
         searchInputs.forEach(function(input) {
             var timeout;
             input.addEventListener('input', function() {
                 clearTimeout(timeout);
                 timeout = setTimeout(function() {
-                    if (input.id === 'companySearch') filterCompanies();
-                    else if (input.id === 'categorySearch') filterCategories();
-                    else if (input.id === 'overdueSearch') filterOverdue();
-                    else if (input.id === 'completedSearch') filterCompleted();
-                    else if (input.id === 'pendingSearch') filterPending();
+                    if (input.id === 'companySearch') loadCompanies(0);
+                    else if (input.id === 'categorySearch') loadCategories(0);
+                    else if (input.id === 'overdueSearch') loadOverdue(0);
+                    else if (input.id === 'completedSearch') loadCompleted(0);
+                    else if (input.id === 'pendingSearch') loadPending(0);
                 }, 300);
             });
         });

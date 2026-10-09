@@ -72,9 +72,10 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
 
 
 
-    @Query("SELECT cc FROM CompanyCompliance cc " +
+    @Query("SELECT DISTINCT cc FROM CompanyCompliance cc " +
             "JOIN FETCH cc.template " +
             "LEFT JOIN FETCH cc.subTemplate " +
+            "LEFT JOIN FETCH cc.config " +
             "WHERE cc.company.id = :companyId AND cc.isActive = true AND cc.deleted = false")
     List<CompanyCompliance> findByCompanyIdAndIsActiveTrueAndDeletedFalse(@Param("companyId") Long companyId);
 
@@ -431,26 +432,115 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
     // ==================== ASSIGNMENTS: FILTERED + SORTED (DB-level) ====================
 
     /**
-     * Filters and sorts at the database level BEFORE pagination. Required so a company's
-     * or template's assignment list can't be squeezed out of the page by unrelated rows
-     * (e.g. a burst of new CompanyCompliance rows from auto-assigning every template to
-     * a newly created company) getting a more recent createdAt.
+     * Paginated ID-only query — no JOIN FETCH here.
+     * JOIN FETCH with Pageable causes Hibernate to load ALL rows into memory.
+     * Step 1: get the page of IDs. Step 2: fetch associations via fetchByIds.
      */
-    @Query("SELECT cc FROM CompanyCompliance cc " +
+    @Query(value = "SELECT cc FROM CompanyCompliance cc " +
+            "LEFT JOIN cc.company c " +
+            "LEFT JOIN cc.template t " +
+            "LEFT JOIN cc.subTemplate st " +
             "WHERE cc.deleted = false " +
             "AND (:companyId IS NULL OR cc.company.id = :companyId) " +
             "AND (:status IS NULL OR cc.status = :status) " +
             "AND (:templateId IS NULL OR cc.template.id = :templateId) " +
             "AND (:isActive IS NULL OR cc.isActive = :isActive) " +
-            "ORDER BY cc.template.priority ASC, cc.template.name ASC")
+            "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(t.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR (st IS NOT NULL AND LOWER(st.name) LIKE LOWER(CONCAT('%', :search, '%'))))",
+           countQuery = "SELECT COUNT(cc) FROM CompanyCompliance cc " +
+            "LEFT JOIN cc.company c " +
+            "LEFT JOIN cc.template t " +
+            "LEFT JOIN cc.subTemplate st " +
+            "WHERE cc.deleted = false " +
+            "AND (:companyId IS NULL OR cc.company.id = :companyId) " +
+            "AND (:status IS NULL OR cc.status = :status) " +
+            "AND (:templateId IS NULL OR cc.template.id = :templateId) " +
+            "AND (:isActive IS NULL OR cc.isActive = :isActive) " +
+            "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(t.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR (st IS NOT NULL AND LOWER(st.name) LIKE LOWER(CONCAT('%', :search, '%'))))")
     Page<CompanyCompliance> findAllAssignmentsFiltered(@Param("companyId") Long companyId,
                                                        @Param("status") ComplianceStatus status,
                                                        @Param("templateId") Long templateId,
                                                        @Param("isActive") Boolean isActive,
+                                                       @Param("search") String search,
                                                        Pageable pageable);
 
+    /**
+     * Overdue-specific paginated query (no JOIN FETCH, safe with Pageable).
+     * Includes rows with OVERDUE status OR where due date has passed and not COMPLETED.
+     */
+    @Query(value = "SELECT cc FROM CompanyCompliance cc " +
+            "LEFT JOIN cc.company c " +
+            "LEFT JOIN cc.template t " +
+            "LEFT JOIN cc.subTemplate st " +
+            "LEFT JOIN cc.config cfg " +
+            "WHERE cc.deleted = false " +
+            "AND (:companyId IS NULL OR cc.company.id = :companyId) " +
+            "AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED)) " +
+            "AND (:templateId IS NULL OR cc.template.id = :templateId) " +
+            "AND (:isActive IS NULL OR cc.isActive = :isActive) " +
+            "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(t.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR (st IS NOT NULL AND LOWER(st.name) LIKE LOWER(CONCAT('%', :search, '%'))))",
+           countQuery = "SELECT COUNT(cc) FROM CompanyCompliance cc " +
+            "LEFT JOIN cc.company c " +
+            "LEFT JOIN cc.template t " +
+            "LEFT JOIN cc.subTemplate st " +
+            "LEFT JOIN cc.config cfg " +
+            "WHERE cc.deleted = false " +
+            "AND (:companyId IS NULL OR cc.company.id = :companyId) " +
+            "AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED)) " +
+            "AND (:templateId IS NULL OR cc.template.id = :templateId) " +
+            "AND (:isActive IS NULL OR cc.isActive = :isActive) " +
+            "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(t.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR (st IS NOT NULL AND LOWER(st.name) LIKE LOWER(CONCAT('%', :search, '%'))))")
+    Page<CompanyCompliance> findOverdueAssignmentsFiltered(@Param("companyId") Long companyId,
+                                                           @Param("templateId") Long templateId,
+                                                           @Param("isActive") Boolean isActive,
+                                                           @Param("search") String search,
+                                                           Pageable pageable);
 
+    /**
+     * Step 2: Efficiently load full entity graph for a specific set of IDs (no pagination).
+     * Use this AFTER pagination to avoid in-memory pagination.
+     */
+    @Query("SELECT cc FROM CompanyCompliance cc " +
+            "LEFT JOIN FETCH cc.company comp " +
+            "LEFT JOIN FETCH cc.template t " +
+            "LEFT JOIN FETCH cc.subTemplate st " +
+            "LEFT JOIN FETCH cc.config cfg " +
+            "LEFT JOIN FETCH comp.companyAdmin " +
+            "WHERE cc.id IN :ids")
+    List<CompanyCompliance> fetchByIds(@Param("ids") List<Long> ids);
+
+    @Query("SELECT COUNT(cc) FROM CompanyCompliance cc LEFT JOIN cc.config cfg WHERE cc.deleted = false AND cc.isActive = true AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED))")
+    long countOverdueActiveAssignments();
+
+    @Query("SELECT cc.status, COUNT(cc) FROM CompanyCompliance cc WHERE cc.deleted = false AND cc.isActive = true GROUP BY cc.status")
+    List<Object[]> countAssignmentsGroupedByStatus();
+
+    @Query("SELECT COUNT(cc) FROM CompanyCompliance cc WHERE cc.deleted = false AND cc.isActive = true")
+    long countTotalActiveAssignments();
 
     @Query("SELECT cc FROM CompanyCompliance cc WHERE cc.company.id = :companyId")
     List<CompanyCompliance> findAllByCompanyIdRaw(@Param("companyId") Long companyId);
+
+    @Query(value = "SELECT c.id, c.name, c.email, COUNT(cc), MIN(cfg.dueDate) FROM CompanyCompliance cc " +
+            "JOIN cc.company c " +
+            "LEFT JOIN cc.config cfg " +
+            "WHERE cc.deleted = false AND cc.isActive = true " +
+            "AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED)) " +
+            "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) OR LOWER(c.email) LIKE LOWER(CONCAT('%', :search, '%'))) " +
+            "GROUP BY c.id, c.name, c.email " +
+            "ORDER BY COUNT(cc) DESC",
+           countQuery = "SELECT COUNT(DISTINCT c.id) FROM CompanyCompliance cc " +
+            "JOIN cc.company c " +
+            "LEFT JOIN cc.config cfg " +
+            "WHERE cc.deleted = false AND cc.isActive = true " +
+            "AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED)) " +
+            "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) OR LOWER(c.email) LIKE LOWER(CONCAT('%', :search, '%')))")
+    Page<Object[]> findOverdueCompaniesSummary(@Param("search") String search, Pageable pageable);
 }

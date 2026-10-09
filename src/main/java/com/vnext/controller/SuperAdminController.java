@@ -242,10 +242,11 @@ public class SuperAdminController {
     @GetMapping("/compliance/templates")
     public ApiResponse<Page<ComplianceTemplateSummaryDTO>> getCompliances(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String search) {
         Pageable pageable = PageRequest.of(page, size,
                 Sort.by("priority").ascending().and(Sort.by("name").ascending()));
-        Page<ComplianceTemplateSummaryDTO> templates = complianceService.getSuperAdminTemplatesWithStats(pageable);
+        Page<ComplianceTemplateSummaryDTO> templates = complianceService.getSuperAdminTemplatesWithStats(search, pageable);
         return ApiResponse.success(templates, "Compliances retrieved successfully");
     }
 
@@ -357,51 +358,40 @@ public class SuperAdminController {
             @RequestParam(required = false) Long companyId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long templateId,
-            @RequestParam(required = false) Boolean isActive) {
+            @RequestParam(required = false) Boolean isActive,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortDir) {
 
-        log.info("=== GETTING ASSIGNMENTS ===");
-        log.info("companyId: {}, templateId: {}", companyId, templateId);
+        log.info("=== GETTING ASSIGNMENTS (Page: {}, Size: {}, companyId: {}, templateId: {}, status: {}, search: {}, sortBy: {}, sortDir: {}) ===",
+                page, size, companyId, templateId, status, search, sortBy, sortDir);
 
         ComplianceStatus statusEnum = null;
         if (status != null && !status.isEmpty()) {
             try {
-                statusEnum = ComplianceStatus.valueOf(status);
+                statusEnum = ComplianceStatus.valueOf(status.trim().toUpperCase());
             } catch (IllegalArgumentException e) {
                 log.warn("Ignoring invalid status filter: {}", status);
             }
         }
 
-        Pageable pageable = PageRequest.of(page, size);
-        Page<CompanyComplianceDTO> assignments = complianceService.getAllAssignments(
-                companyId, statusEnum, templateId, isActive, pageable);
-
-        List<CompanyComplianceDTO> filteredList = new ArrayList<>(assignments.getContent());
-
-        Map<Long, Boolean> templateHasSubs = new HashMap<>();
-        for (CompanyComplianceDTO dto : filteredList) {
-            Long templateIdKey = dto.getTemplateId();
-            if (templateIdKey != null && !templateHasSubs.containsKey(templateIdKey)) {
-                List<ComplianceSubTemplateDTO> subs = complianceService.getSubTemplatesByParent(templateIdKey);
-                templateHasSubs.put(templateIdKey, !subs.isEmpty());
+        Sort sort;
+        if (sortBy != null && !sortBy.trim().isEmpty()) {
+            String prop = sortBy.trim();
+            if ("assignedAt".equalsIgnoreCase(prop) || "createdAt".equalsIgnoreCase(prop)) {
+                prop = "createdAt";
             }
+            Sort.Direction dir = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
+            sort = Sort.by(dir, prop);
+        } else {
+            sort = Sort.by(Sort.Direction.ASC, "template.priority", "template.name");
         }
 
-        filteredList = filteredList.stream()
-                .filter(dto -> {
-                    if (dto.getSubTemplateName() == null &&
-                            dto.getTemplateId() != null &&
-                            templateHasSubs.getOrDefault(dto.getTemplateId(), false)) {
-                        return false;
-                    }
-                    return true;
-                })
-                .collect(Collectors.toList());
+        Pageable pageable = PageRequest.of(page, size, sort);
+        Page<CompanyComplianceDTO> assignments = complianceService.getAllAssignments(
+                companyId, statusEnum, templateId, isActive, search, pageable);
 
-        log.info("Returning {} assignments", filteredList.size());
-
-        return ApiResponse.success(
-                new PageImpl<>(filteredList, pageable, assignments.getTotalElements()),
-                "Assignments retrieved successfully");
+        return ApiResponse.success(assignments, "Assignments retrieved successfully");
     }
 
     @GetMapping("/compliance/assignments/{id}")
@@ -524,13 +514,7 @@ public class SuperAdminController {
 
     @GetMapping("/stats")
     public ApiResponse<Map<String, Object>> getStats() {
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("totalCompanies", companyService.getTotalCompanies());
-        stats.put("activeCompanies", companyService.getTotalActiveCompanies());
-        stats.put("deactivatedCompanies", companyService.getTotalDeactivatedCompanies());
-        stats.put("totalCompliances", complianceService.getSuperAdminCompliances().size());
-        stats.put("totalAssignments",
-                complianceService.getAllAssignments(null, null, null, null, PageRequest.of(0, 1)).getTotalElements());
+        Map<String, Object> stats = complianceService.getDashboardStatsSummary();
         return ApiResponse.success(stats, "Stats retrieved successfully");
     }
 
@@ -541,8 +525,18 @@ public class SuperAdminController {
 
     @GetMapping("/dashboard/overdue")
     public ApiResponse<List<Map<String, Object>>> getOverdueCompliances() {
-        List<Map<String, Object>> overdue = new ArrayList<>();
-        return ApiResponse.success(overdue, "Overdue compliances retrieved");
+        List<Map<String, Object>> overdue = complianceService.getOverdueCompliancesForDashboard();
+        return ApiResponse.success(overdue, "Overdue compliances retrieved successfully");
+    }
+
+    @GetMapping("/dashboard/overdue-companies")
+    public ApiResponse<Page<Map<String, Object>>> getOverdueCompanies(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String search) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Map<String, Object>> overdueCompanies = complianceService.getOverdueCompaniesSummary(search, pageable);
+        return ApiResponse.success(overdueCompanies, "Overdue companies retrieved successfully");
     }
 
     // ==================== CHANGE PASSWORD ====================

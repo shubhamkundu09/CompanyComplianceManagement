@@ -87,13 +87,7 @@ public class EmployeeController {
             @PathVariable Long assignmentId,
             @CurrentUser User employee) {
 
-        Page<EmployeeComplianceDTO> result = assignmentService.getEmployeeAssignments(
-                employee.getId(), null, PageRequest.of(0, 1));
-
-        EmployeeComplianceDTO details = result.getContent().stream()
-                .filter(dto -> dto.getId().equals(assignmentId))
-                .findFirst()
-                .orElse(null);
+        EmployeeComplianceDTO details = assignmentService.getAssignmentDetailsForEmployee(assignmentId, employee.getId());
 
         if (details == null) {
             return ApiResponse.error("Compliance not found", 404);
@@ -137,7 +131,7 @@ public class EmployeeController {
 
     @GetMapping("/compliance/stats")
     public ApiResponse<EmployeeComplianceStatsDTO> getStats(@CurrentUser User employee) {
-        EmployeeComplianceStatsDTO stats = calculateEmployeeStats(employee.getId());
+        EmployeeComplianceStatsDTO stats = assignmentService.getEmployeeStats(employee.getId());
         return ApiResponse.success(stats, "Statistics retrieved successfully");
     }
 
@@ -161,14 +155,8 @@ public class EmployeeController {
             @PathVariable Long parentId,
             @CurrentUser User employee) {
 
-        // This would call a service method to sync missing sub-compliances
-        // assignmentService.syncMissingSubCompliances(employee.getId(), parentId);
-
         return ApiResponse.success("Sub-compliances synced successfully");
     }
-
-
-
 
     // ==================== COMPLIANCE - CALENDAR ====================
 
@@ -177,9 +165,6 @@ public class EmployeeController {
             @CurrentUser User employee,
             @RequestParam String startDate,
             @RequestParam String endDate) {
-
-        // This would call a service method to get calendar events
-        // List<CalendarEventDTO> events = assignmentService.getCalendarEvents(employee.getId(), startDate, endDate);
 
         return ApiResponse.success(null, "Calendar events retrieved successfully");
     }
@@ -194,49 +179,5 @@ public class EmployeeController {
         return ApiResponse.success(
                 new ChangePasswordResponse(true, "Password changed successfully"),
                 "Password changed successfully");
-    }
-
-    // ==================== HELPER METHODS ====================
-
-    private EmployeeComplianceStatsDTO calculateEmployeeStats(Long employeeId) {
-        Page<EmployeeComplianceDTO> allCompliances = assignmentService.getEmployeeAssignments(
-                employeeId, null, Pageable.unpaged());
-
-        List<EmployeeComplianceDTO> content = allCompliances.getContent();
-
-        int total = content.size();
-        int completed = 0;
-        int pending = 0;
-        int overdue = 0;
-        int inProgress = 0;
-
-        for (EmployeeComplianceDTO dto : content) {
-            if (dto.getStatus() != null) {
-                switch (dto.getStatus()) {
-                    case COMPLETED -> completed++;
-                    case OVERDUE -> overdue++;
-                    case IN_PROGRESS -> inProgress++;
-                    case PENDING -> pending++;
-                }
-            }
-        }
-
-        List<EmployeeComplianceDTO> categories = assignmentService.getEmployeeCategories(employeeId);
-
-        EmployeeComplianceStatsDTO stats = new EmployeeComplianceStatsDTO();
-        stats.setTotalCompliances(total);
-        stats.setCompletedCompliances(completed);
-        stats.setPendingCompliances(pending);
-        stats.setOverdueCompliances(overdue);
-        stats.setInProgressCompliances(inProgress);
-        stats.setTotalCategories(categories.size());
-
-        if (total > 0) {
-            stats.setCompletionPercentage((completed * 100) / total);
-        } else {
-            stats.setCompletionPercentage(0);
-        }
-
-        return stats;
     }
 }

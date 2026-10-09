@@ -2336,6 +2336,8 @@
                        due.setHours(0, 0, 0, 0);
                        if (due < today && status !== "COMPLETED") {
                            status = "OVERDUE";
+                       } else if (due >= today && status === "OVERDUE") {
+                           status = "IN_PROGRESS";
                        }
                    }
                    return {
@@ -2393,12 +2395,14 @@
                    } else {
                        overallStatus = targetEntry.status || "PENDING";
                    }
-                   var parentDueDate = foundParentEntry ? foundParentEntry.dueDate : targetEntry.dueDate;
+                   var parentDueDate = foundParentEntry ? (foundParentEntry.dueDate || foundParentEntry.effectiveDueDate) : (targetEntry.dueDate || targetEntry.effectiveDueDate);
                    if (parentDueDate) {
                        var due = new Date(parentDueDate);
                        due.setHours(0, 0, 0, 0);
                        if (due < today && overallStatus !== "COMPLETED") {
                            overallStatus = "OVERDUE";
+                       } else if (due >= today && overallStatus === "OVERDUE") {
+                           overallStatus = "IN_PROGRESS";
                        }
                    }
                }

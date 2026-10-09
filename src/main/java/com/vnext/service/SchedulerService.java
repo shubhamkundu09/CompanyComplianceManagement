@@ -51,6 +51,17 @@ public class SchedulerService {
         }
     }
 
+    // ─── BACKGROUND SYNC FOR OVERDUE STATUSES (every 30 mins) ────────────────
+    @Scheduled(cron = "0 0/30 * * * ?", zone = "Asia/Kolkata")
+    public void scheduledSyncOverdueComplianceStatuses() {
+        try {
+            log.info("Running background scheduled sync for overdue compliance statuses...");
+            complianceService.syncOverdueComplianceStatuses();
+        } catch (Exception e) {
+            log.warn("Error in background scheduled sync for overdue compliance statuses: {}", e.getMessage());
+        }
+    }
+
     // ─── 1. RECURRING COMPLIANCE RENEWAL ──────────────────────────────────────
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Kolkata") // daily at 00:05 IST
     @Transactional
@@ -76,7 +87,8 @@ public class SchedulerService {
             if (config == null) {
                 config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
             }
-            if (config == null || config.getFrequency() == null || config.getFrequency() == ComplianceFrequency.ONE_TIME) {
+            if (config == null || config.getFrequency() == null
+                    || config.getFrequency() == ComplianceFrequency.ONE_TIME) {
                 continue;
             }
 
@@ -85,16 +97,21 @@ public class SchedulerService {
             if (lastDueDate == null) {
                 lastDueDate = complianceService.calculateEffectiveDueDate(config);
             }
-            if (lastDueDate == null) continue;
+            if (lastDueDate == null)
+                continue;
 
             LocalDate nextDueDate = complianceService.getNextDueDateForCompliance(cc);
-            if (nextDueDate == null) continue;
+            if (nextDueDate == null)
+                continue;
 
             // Renew when completed compliance has reached or passed its due date
-            boolean shouldRenew = today.isAfter(lastDueDate) || (today.getDayOfMonth() == 1 && !today.isBefore(lastDueDate));
-            if (!shouldRenew) continue;
+            boolean shouldRenew = today.isAfter(lastDueDate)
+                    || (today.getDayOfMonth() == 1 && !today.isBefore(lastDueDate));
+            if (!shouldRenew)
+                continue;
 
-            log.info("Renewing compliance ID: {} for company: {}", cc.getId(), cc.getCompany() != null ? cc.getCompany().getName() : "N/A");
+            log.info("Renewing compliance ID: {} for company: {}", cc.getId(),
+                    cc.getCompany() != null ? cc.getCompany().getName() : "N/A");
 
             // Update config due date
             config.setDueDate(nextDueDate);
@@ -149,7 +166,8 @@ public class SchedulerService {
         }
     }
 
-    // ─── 2. OVERDUE EMPLOYEE COMPLIANCES (Push Notifications to SuperAdmin, CompanyAdmin & Employee) ──────────────
+    // ─── 2. OVERDUE EMPLOYEE COMPLIANCES (Push Notifications to SuperAdmin,
+    // CompanyAdmin & Employee) ──────────────
     @Scheduled(cron = "0 30 8 * * *", zone = "Asia/Kolkata") // daily at 08:30 IST
     @Transactional
     public void checkOverdueEmployeeCompliances() {
@@ -172,14 +190,17 @@ public class SchedulerService {
                 continue;
             }
 
-            // Skip if already completed (directly, via CompanyCompliance, or by another employee)
+            // Skip if already completed (directly, via CompanyCompliance, or by another
+            // employee)
             if (isAssignmentCompleted(assignment)) {
                 continue;
             }
 
             var config = assignment.getConfig();
-            int intervalDays = (config != null && config.getReminderIntervalDays() != null && config.getReminderIntervalDays() > 0) ? config.getReminderIntervalDays() : 3;
-            boolean repeat = (config == null || config.getRepeatReminder() == null || Boolean.TRUE.equals(config.getRepeatReminder()));
+            int intervalDays = (config != null && config.getReminderIntervalDays() != null
+                    && config.getReminderIntervalDays() > 0) ? config.getReminderIntervalDays() : 3;
+            boolean repeat = (config == null || config.getRepeatReminder() == null
+                    || Boolean.TRUE.equals(config.getRepeatReminder()));
 
             // Check if already notified and whether repeat interval has elapsed
             if (assignment.getOverdueNotifiedAt() != null) {
@@ -202,10 +223,10 @@ public class SchedulerService {
             notificationEventService.notifyUserPushOnly(
                     assignment.getEmployeeId(),
                     "Compliance Overdue",
-                    "Your assigned compliance \"" + complianceName + "\" was due on " + (dueDate != null ? dueDate.toString() : "schedule") + " and is now overdue.",
+                    "Your assigned compliance \"" + complianceName + "\" was due on "
+                            + (dueDate != null ? dueDate.toString() : "schedule") + " and is now overdue.",
                     NotificationType.COMPLIANCE_OVERDUE,
-                    "employee_compliance"
-            );
+                    "employee_compliance");
 
             // 2. Push to company admin
             if (companyId != null) {
@@ -215,20 +236,20 @@ public class SchedulerService {
                     notificationEventService.notifyUserPushOnly(
                             companyAdmin.getId(),
                             "Compliance Overdue",
-                            "Company " + companyName + " has overdue compliance \"" + complianceName + "\" (assigned to " + employeeName + ").",
+                            "Company " + companyName + " has overdue compliance \"" + complianceName
+                                    + "\" (assigned to " + employeeName + ").",
                             NotificationType.COMPLIANCE_OVERDUE,
-                            "compliance_details"
-                    );
+                            "compliance_details");
                 }
             }
 
             // 3. Push to all SuperAdmins
             notificationEventService.notifySuperAdminsPushOnly(
                     "Compliance Overdue",
-                    "Company " + companyName + " is overdue on compliance \"" + complianceName + "\" (Employee: " + employeeName + ").",
+                    "Company " + companyName + " is overdue on compliance \"" + complianceName + "\" (Employee: "
+                            + employeeName + ").",
                     NotificationType.COMPLIANCE_OVERDUE,
-                    "compliance_details"
-            );
+                    "compliance_details");
 
             // Mark as notified
             assignment.setOverdueNotifiedAt(LocalDateTime.now(IST_ZONE));
@@ -267,14 +288,16 @@ public class SchedulerService {
         }
 
         int timesPerDay = Math.max(1, Math.min(20, cfg.getTimesPerDay() != null ? cfg.getTimesPerDay() : 3));
-        int startHour   = cfg.getStartHour()  != null ? cfg.getStartHour()  : 8;
-        int endHour     = cfg.getEndHour()    != null ? cfg.getEndHour()    : 20;
+        int startHour = cfg.getStartHour() != null ? cfg.getStartHour() : 8;
+        int endHour = cfg.getEndHour() != null ? cfg.getEndHour() : 20;
 
         // Start-of-day anchor
         LocalDateTime dayStart = todayIst.atTime(startHour, 0);
 
-        // ── Reset today counter if date changed or last send was before today's window start ───
-        if (!todayIst.equals(cfg.getLastSentDate()) || (cfg.getLastSentAt() != null && cfg.getLastSentAt().isBefore(dayStart))) {
+        // ── Reset today counter if date changed or last send was before today's window
+        // start ───
+        if (!todayIst.equals(cfg.getLastSentDate())
+                || (cfg.getLastSentAt() != null && cfg.getLastSentAt().isBefore(dayStart))) {
             cfg.setLastSentDate(todayIst);
             cfg.setSentTodayCount(0);
             cfg.setLastSentAt(null);
@@ -286,7 +309,8 @@ public class SchedulerService {
 
         // ── Already sent the full quota for today? ────────────────────────────
         if (cfg.getSentTodayCount() >= timesPerDay) {
-            log.debug("DUE_REMINDER: already sent {} / {} times today — skipping.", cfg.getSentTodayCount(), timesPerDay);
+            log.debug("DUE_REMINDER: already sent {} / {} times today — skipping.", cfg.getSentTodayCount(),
+                    timesPerDay);
             return;
         }
 
@@ -305,7 +329,8 @@ public class SchedulerService {
 
         // Determine which slot index corresponds to current time
         long minutesFromStart = Math.max(0, java.time.Duration.between(dayStart, nowIst).toMinutes());
-        int expectedSlotIndex = timesPerDay <= 1 ? 0 : (int) Math.floor(minutesFromStart / (intervalMinutes > 0 ? intervalMinutes : 1.0));
+        int expectedSlotIndex = timesPerDay <= 1 ? 0
+                : (int) Math.floor(minutesFromStart / (intervalMinutes > 0 ? intervalMinutes : 1.0));
         expectedSlotIndex = Math.max(0, Math.min(timesPerDay - 1, expectedSlotIndex));
 
         int currentSentCount = cfg.getSentTodayCount() != null ? cfg.getSentTodayCount() : 0;
@@ -332,7 +357,8 @@ public class SchedulerService {
             }
         }
 
-        log.info("DUE_REMINDER: firing slot {}/{} (slot expected {}, now {})", expectedSlotIndex + 1, timesPerDay, slotTime, nowIst);
+        log.info("DUE_REMINDER: firing slot {}/{} (slot expected {}, now {})", expectedSlotIndex + 1, timesPerDay,
+                slotTime, nowIst);
 
         // ── Claim the slot immediately to prevent duplicate sends ─────────────
         cfg.setSentTodayCount(expectedSlotIndex + 1);
@@ -345,7 +371,8 @@ public class SchedulerService {
     }
 
     /**
-     * Executes the actual due and overdue reminder check for both employee assignments
+     * Executes the actual due and overdue reminder check for both employee
+     * assignments
      * and company-level compliances.
      */
     @Transactional
@@ -367,15 +394,18 @@ public class SchedulerService {
                 continue;
             }
 
-            // Skip if already completed (directly or via CompanyCompliance / other employee)
+            // Skip if already completed (directly or via CompanyCompliance / other
+            // employee)
             if (isAssignmentCompleted(assignment)) {
                 continue;
             }
 
             var config = assignment.getConfig();
-            if (config == null) continue;
+            if (config == null)
+                continue;
             LocalDate dueDate = assignment.getDueDate();
-            if (dueDate == null) continue;
+            if (dueDate == null)
+                continue;
 
             String complianceName = getComplianceName(assignment);
             String employeeName = getUserName(assignment.getEmployeeId());
@@ -388,19 +418,19 @@ public class SchedulerService {
                 notificationEventService.notifyUserPushOnly(
                         assignment.getEmployeeId(),
                         "Compliance Due TODAY",
-                        "Compliance \"" + complianceName + "\" is DUE TODAY (" + today + ")! Please complete and submit.",
+                        "Compliance \"" + complianceName + "\" is DUE TODAY (" + today
+                                + ")! Please complete and submit.",
                         NotificationType.COMPLIANCE_DUE_SOON,
-                        "employee_compliance"
-                );
+                        "employee_compliance");
 
                 if (!companyAdminIds.isEmpty()) {
                     notificationEventService.notifyUsersPushOnly(
                             companyAdminIds,
                             "Compliance Due TODAY",
-                            "Employee " + employeeName + " has compliance \"" + complianceName + "\" DUE TODAY (" + today + ").",
+                            "Employee " + employeeName + " has compliance \"" + complianceName + "\" DUE TODAY ("
+                                    + today + ").",
                             NotificationType.COMPLIANCE_DUE_SOON,
-                            "compliance_details"
-                    );
+                            "compliance_details");
                 }
                 assignment.setLastReminderSent(today);
                 assignmentRepository.save(assignment);
@@ -415,19 +445,20 @@ public class SchedulerService {
                     notificationEventService.notifyUserPushOnly(
                             assignment.getEmployeeId(),
                             "Compliance Due Soon",
-                            "Compliance \"" + complianceName + "\" is due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
+                            "Compliance \"" + complianceName + "\" is due in " + daysRemaining + " day"
+                                    + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
                             NotificationType.COMPLIANCE_DUE_SOON,
-                            "employee_compliance"
-                    );
+                            "employee_compliance");
 
                     if (!companyAdminIds.isEmpty()) {
                         notificationEventService.notifyUsersPushOnly(
                                 companyAdminIds,
                                 "Compliance Due Soon",
-                                "Employee " + employeeName + " has compliance \"" + complianceName + "\" due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
+                                "Employee " + employeeName + " has compliance \"" + complianceName + "\" due in "
+                                        + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate
+                                        + ").",
                                 NotificationType.COMPLIANCE_DUE_SOON,
-                                "compliance_details"
-                        );
+                                "compliance_details");
                     }
 
                     assignment.setLastReminderSent(today);
@@ -450,13 +481,15 @@ public class SchedulerService {
                 continue;
             }
 
-            // Skip if already completed (directly or via CompanyCompliance / other employee)
+            // Skip if already completed (directly or via CompanyCompliance / other
+            // employee)
             if (isAssignmentCompleted(assignment)) {
                 continue;
             }
 
             LocalDate dueDate = assignment.getDueDate();
-            if (dueDate == null) continue;
+            if (dueDate == null)
+                continue;
 
             if (assignment.getConfig() != null) {
                 notifiedConfigIds.add(assignment.getConfig().getId());
@@ -480,27 +513,27 @@ public class SchedulerService {
             notificationEventService.notifyUserPushOnly(
                     assignment.getEmployeeId(),
                     "Compliance OVERDUE",
-                    "Compliance \"" + complianceName + "\" was due on " + dueDate + " and is OVERDUE by " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + "! Immediate submission required.",
+                    "Compliance \"" + complianceName + "\" was due on " + dueDate + " and is OVERDUE by " + daysOverdue
+                            + " day" + (daysOverdue == 1 ? "" : "s") + "! Immediate submission required.",
                     NotificationType.COMPLIANCE_OVERDUE,
-                    "employee_compliance"
-            );
+                    "employee_compliance");
 
             if (!companyAdminIds.isEmpty()) {
                 notificationEventService.notifyUsersPushOnly(
                         companyAdminIds,
                         "Compliance OVERDUE",
-                        "Employee " + employeeName + " has overdue compliance \"" + complianceName + "\" (" + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " overdue).",
+                        "Employee " + employeeName + " has overdue compliance \"" + complianceName + "\" ("
+                                + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " overdue).",
                         NotificationType.COMPLIANCE_OVERDUE,
-                        "compliance_details"
-                );
+                        "compliance_details");
             }
 
             notificationEventService.notifySuperAdminsPushOnly(
                     "Compliance OVERDUE",
-                    "Company " + companyName + " has overdue compliance \"" + complianceName + "\" (Employee: " + employeeName + ", " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " overdue).",
+                    "Company " + companyName + " has overdue compliance \"" + complianceName + "\" (Employee: "
+                            + employeeName + ", " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " overdue).",
                     NotificationType.COMPLIANCE_OVERDUE,
-                    "compliance_details"
-            );
+                    "compliance_details");
 
             assignment.setLastReminderSent(today);
             assignmentRepository.save(assignment);
@@ -528,10 +561,12 @@ public class SchedulerService {
                 config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
             }
             if (config == null && cc.getSubTemplate() != null) {
-                config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+                config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId())
+                        .orElse(null);
             }
             if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
-                config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+                config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId())
+                        .orElse(null);
             }
             if (config == null) {
                 continue;
@@ -553,8 +588,10 @@ public class SchedulerService {
                 continue;
             }
 
-            // Skip if this compliance was already notified as an employee assignment in Section 2
-            if (notifiedCompanyComplianceIds.contains(cc.getId()) || (config.getId() != null && notifiedConfigIds.contains(config.getId()))) {
+            // Skip if this compliance was already notified as an employee assignment in
+            // Section 2
+            if (notifiedCompanyComplianceIds.contains(cc.getId())
+                    || (config.getId() != null && notifiedConfigIds.contains(config.getId()))) {
                 continue;
             }
 
@@ -567,35 +604,38 @@ public class SchedulerService {
 
             if (dueDate.equals(today)) {
                 // DUE TODAY — notify Company Admin only (not SuperAdmin)
-                log.info("Sending DUE TODAY reminder for compliance '{}' (ID: {}) to company '{}'", complianceTitle, cc.getId(), companyName);
+                log.info("Sending DUE TODAY reminder for compliance '{}' (ID: {}) to company '{}'", complianceTitle,
+                        cc.getId(), companyName);
                 if (!companyAdminIds.isEmpty()) {
                     notificationEventService.notifyUsersPushOnly(
                             companyAdminIds,
                             "Compliance Due TODAY",
-                            "Company compliance \"" + complianceTitle + "\" is DUE TODAY (" + today + "). Please complete and submit.",
+                            "Company compliance \"" + complianceTitle + "\" is DUE TODAY (" + today
+                                    + "). Please complete and submit.",
                             NotificationType.COMPLIANCE_DUE_SOON,
-                            "compliance_details"
-                    );
+                            "compliance_details");
                 }
             } else if (dueDate.isBefore(today)) {
                 // OVERDUE
                 long daysOverdue = ChronoUnit.DAYS.between(dueDate, today);
-                log.info("Sending OVERDUE reminder for compliance '{}' (ID: {}, {} days overdue) to company '{}'", complianceTitle, cc.getId(), daysOverdue, companyName);
+                log.info("Sending OVERDUE reminder for compliance '{}' (ID: {}, {} days overdue) to company '{}'",
+                        complianceTitle, cc.getId(), daysOverdue, companyName);
                 if (!companyAdminIds.isEmpty()) {
                     notificationEventService.notifyUsersPushOnly(
                             companyAdminIds,
                             "Compliance OVERDUE",
-                            "Company compliance \"" + complianceTitle + "\" was due on " + dueDate + " and is OVERDUE by " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + "! Immediate action required.",
+                            "Company compliance \"" + complianceTitle + "\" was due on " + dueDate
+                                    + " and is OVERDUE by " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s")
+                                    + "! Immediate action required.",
                             NotificationType.COMPLIANCE_OVERDUE,
-                            "compliance_details"
-                    );
+                            "compliance_details");
                 }
                 notificationEventService.notifySuperAdminsPushOnly(
                         "Company Compliance OVERDUE",
-                        "Company " + companyName + " compliance \"" + complianceTitle + "\" is OVERDUE by " + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " (" + dueDate + ").",
+                        "Company " + companyName + " compliance \"" + complianceTitle + "\" is OVERDUE by "
+                                + daysOverdue + " day" + (daysOverdue == 1 ? "" : "s") + " (" + dueDate + ").",
                         NotificationType.COMPLIANCE_OVERDUE,
-                        "compliance_details"
-                );
+                        "compliance_details");
             } else if (dueDate.isAfter(today) && !dueDate.isAfter(future)) {
                 // DUE SOON
                 int reminderDays = config.getReminderDaysBefore() != null ? config.getReminderDaysBefore() : 10;
@@ -604,15 +644,16 @@ public class SchedulerService {
 
                 if (shouldSend) {
                     // DUE SOON — notify Company Admin only (not SuperAdmin)
-                    log.info("Sending DUE SOON reminder for compliance '{}' (ID: {}, due in {} days) to company '{}'", complianceTitle, cc.getId(), daysRemaining, companyName);
+                    log.info("Sending DUE SOON reminder for compliance '{}' (ID: {}, due in {} days) to company '{}'",
+                            complianceTitle, cc.getId(), daysRemaining, companyName);
                     if (!companyAdminIds.isEmpty()) {
                         notificationEventService.notifyUsersPushOnly(
                                 companyAdminIds,
                                 "Compliance Due Soon",
-                                "Company compliance \"" + complianceTitle + "\" is due in " + daysRemaining + " day" + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
+                                "Company compliance \"" + complianceTitle + "\" is due in " + daysRemaining + " day"
+                                        + (daysRemaining == 1 ? "" : "s") + " (" + dueDate + ").",
                                 NotificationType.COMPLIANCE_DUE_SOON,
-                                "compliance_details"
-                        );
+                                "compliance_details");
                     }
                 }
             }
@@ -621,7 +662,8 @@ public class SchedulerService {
         log.info("Due and overdue reminders processed successfully.");
     }
 
-    // ─── 4. OVERDUE COMPANY COMPLIANCES (Email & Push to SuperAdmin & Company Admin) ──────────────
+    // ─── 4. OVERDUE COMPANY COMPLIANCES (Email & Push to SuperAdmin & Company
+    // Admin) ──────────────
     @Scheduled(cron = "0 0 9 * * *", zone = "Asia/Kolkata") // daily at 09:00 IST
     @Transactional
     public void checkOverdueCompanyCompliances() {
@@ -629,7 +671,8 @@ public class SchedulerService {
 
         LocalDate today = LocalDate.now(IST_ZONE);
 
-        // Find all active CompanyCompliances that are not completed, not parent containers with sub-compliances, and have effective due date < today
+        // Find all active CompanyCompliances that are not completed, not parent
+        // containers with sub-compliances, and have effective due date < today
         List<CompanyCompliance> overdueCCs = companyComplianceRepository.findAll().stream()
                 .filter(cc -> cc.getStatus() != ComplianceStatus.COMPLETED && cc.getCompletedAt() == null)
                 .filter(cc -> cc.getStatus() != ComplianceStatus.EXEMPTED)
@@ -641,16 +684,23 @@ public class SchedulerService {
                         config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
                     }
                     if (config == null && cc.getSubTemplate() != null) {
-                        config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+                        config = configRepository
+                                .findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId())
+                                .orElse(null);
                     }
                     if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
-                        config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+                        config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId())
+                                .orElse(null);
                     }
-                    if (config == null) return false;
-                    if (isCompanyComplianceCompleted(cc, config)) return false;
+                    if (config == null)
+                        return false;
+                    if (isCompanyComplianceCompleted(cc, config))
+                        return false;
                     LocalDate due = config.getDueDate();
-                    if (due == null) due = config.getCustomDueDate();
-                    if (due == null) due = complianceService.calculateEffectiveDueDate(config);
+                    if (due == null)
+                        due = config.getCustomDueDate();
+                    if (due == null)
+                        due = complianceService.calculateEffectiveDueDate(config);
                     return due != null && due.isBefore(today);
                 })
                 .collect(Collectors.toList());
@@ -671,18 +721,22 @@ public class SchedulerService {
                 config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
             }
             if (config == null && cc.getSubTemplate() != null) {
-                config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+                config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId())
+                        .orElse(null);
             }
             if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
-                config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+                config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId())
+                        .orElse(null);
             }
             LocalDate due = null;
             if (config != null) {
                 due = config.getDueDate() != null ? config.getDueDate() : config.getCustomDueDate();
-                if (due == null) due = complianceService.calculateEffectiveDueDate(config);
+                if (due == null)
+                    due = complianceService.calculateEffectiveDueDate(config);
             }
 
-            String complianceTitle = cc.getSubTemplate() != null ? cc.getSubTemplate().getName() : (cc.getTemplate() != null ? cc.getTemplate().getName() : "Compliance");
+            String complianceTitle = cc.getSubTemplate() != null ? cc.getSubTemplate().getName()
+                    : (cc.getTemplate() != null ? cc.getTemplate().getName() : "Compliance");
             String companyName = cc.getCompany() != null ? cc.getCompany().getName() : "Company";
 
             EmailService.OverdueComplianceInfo info = new EmailService.OverdueComplianceInfo();
@@ -709,13 +763,13 @@ public class SchedulerService {
                         comp.getCompanyAdmin().getEmail(),
                         comp.getCompanyAdmin().getFullName(),
                         comp.getName(),
-                        entry.getValue()
-                );
+                        entry.getValue());
             }
         }
 
         // Send master overdue email report to SuperAdmin
-        User superAdmin = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).stream().findFirst().orElse(null);
+        User superAdmin = userRepository.findAllByRoleAndDeletedFalse(UserRole.SUPER_ADMIN).stream().findFirst()
+                .orElse(null);
         if (superAdmin != null && !masterOverdueList.isEmpty()) {
             emailService.sendOverdueEmailToSuperAdmin(superAdmin.getEmail(), masterOverdueList);
             log.info("Master overdue compliance email sent to SuperAdmin.");
@@ -725,17 +779,23 @@ public class SchedulerService {
     // ─── HELPER METHODS ──────────────────────────────────────────────────────
 
     /**
-     * Checks if a CompanyCompliance is a parent container compliance that groups sub-compliances.
-     * Parent container compliances do not represent direct action items and should not trigger
-     * due/overdue alerts on their own (only individual sub-compliances trigger alerts).
+     * Checks if a CompanyCompliance is a parent container compliance that groups
+     * sub-compliances.
+     * Parent container compliances do not represent direct action items and should
+     * not trigger
+     * due/overdue alerts on their own (only individual sub-compliances trigger
+     * alerts).
      */
     private boolean isParentWithSubCompliances(CompanyCompliance cc) {
-        if (cc == null || cc.getTemplate() == null) return false;
-        // If this is an actual sub-compliance (has subTemplate or isParent is false), it is NOT a parent container
+        if (cc == null || cc.getTemplate() == null)
+            return false;
+        // If this is an actual sub-compliance (has subTemplate or isParent is false),
+        // it is NOT a parent container
         if (cc.getSubTemplate() != null || Boolean.FALSE.equals(cc.getIsParent())) {
             return false;
         }
-        // If this is a parent compliance, check if sub-compliances exist for this company & template
+        // If this is a parent compliance, check if sub-compliances exist for this
+        // company & template
         if (cc.getCompany() != null) {
             List<CompanyCompliance> subs = companyComplianceRepository.findSubCompliancesByCompanyIdAndParentTemplateId(
                     cc.getCompany().getId(), cc.getTemplate().getId());
@@ -745,22 +805,27 @@ public class SchedulerService {
         }
         // Also check if the template has active sub-templates
         if (subTemplateRepository != null) {
-            return !subTemplateRepository.findByParentTemplateIdAndIsActiveTrueOrderByDisplayOrderAsc(cc.getTemplate().getId()).isEmpty();
+            return !subTemplateRepository
+                    .findByParentTemplateIdAndIsActiveTrueOrderByDisplayOrderAsc(cc.getTemplate().getId()).isEmpty();
         }
         return false;
     }
 
     /**
-     * Checks if an EmployeeAssignment belongs to a parent container compliance that groups sub-compliances.
-     * Parent container assignments are category containers and should NOT trigger individual due/overdue alerts.
+     * Checks if an EmployeeAssignment belongs to a parent container compliance that
+     * groups sub-compliances.
+     * Parent container assignments are category containers and should NOT trigger
+     * individual due/overdue alerts.
      */
     private boolean isAssignmentForParentWithSubCompliances(EmployeeAssignment assignment) {
-        if (assignment == null) return false;
+        if (assignment == null)
+            return false;
         if (assignmentRepository.existsByParentAssignmentIdAndIsActiveTrue(assignment.getId())) {
             return true;
         }
         var config = assignment.getConfig();
-        if (config == null) return false;
+        if (config == null)
+            return false;
 
         if (Boolean.TRUE.equals(assignment.getIsSubAssignment()) || config.getSubTemplate() != null) {
             return false;
@@ -774,30 +839,40 @@ public class SchedulerService {
         }
 
         if (config.getTemplate() != null && subTemplateRepository != null) {
-            return !subTemplateRepository.findByParentTemplateIdAndIsActiveTrueOrderByDisplayOrderAsc(config.getTemplate().getId()).isEmpty();
+            return !subTemplateRepository
+                    .findByParentTemplateIdAndIsActiveTrueOrderByDisplayOrderAsc(config.getTemplate().getId())
+                    .isEmpty();
         }
 
         return false;
     }
 
     /**
-     * Checks whether an EmployeeAssignment is completed, either directly or via its underlying CompanyCompliance
-     * or via another employee in the company who completed the same compliance config.
+     * Checks whether an EmployeeAssignment is completed, either directly or via its
+     * underlying CompanyCompliance
+     * or via another employee in the company who completed the same compliance
+     * config.
      */
     private boolean isAssignmentCompleted(EmployeeAssignment assignment) {
-        if (assignment == null) return false;
-        if (assignment.getCompletedAt() != null) return true;
+        if (assignment == null)
+            return false;
+        if (assignment.getCompletedAt() != null)
+            return true;
 
         var config = assignment.getConfig();
-        if (config == null) return false;
+        if (config == null)
+            return false;
 
         // Check if company compliance is marked completed
         CompanyCompliance cc = config.getCompanyCompliance();
         if (cc != null && (cc.getStatus() == ComplianceStatus.COMPLETED || cc.getCompletedAt() != null)) {
             assignment.setCompletedAt(cc.getCompletedAt() != null ? cc.getCompletedAt() : LocalDateTime.now(IST_ZONE));
-            if (cc.getCompletedBy() != null) assignment.setCompletedBy(cc.getCompletedBy());
-            if (cc.getAdminSubmissionReference() != null) assignment.setSubmissionReference(cc.getAdminSubmissionReference());
-            if (cc.getAdminSubmissionDocumentUrl() != null) assignment.setSubmissionDocumentUrl(cc.getAdminSubmissionDocumentUrl());
+            if (cc.getCompletedBy() != null)
+                assignment.setCompletedBy(cc.getCompletedBy());
+            if (cc.getAdminSubmissionReference() != null)
+                assignment.setSubmissionReference(cc.getAdminSubmissionReference());
+            if (cc.getAdminSubmissionDocumentUrl() != null)
+                assignment.setSubmissionDocumentUrl(cc.getAdminSubmissionDocumentUrl());
             assignmentRepository.save(assignment);
             return true;
         }
@@ -818,10 +893,12 @@ public class SchedulerService {
     }
 
     /**
-     * Checks whether a CompanyCompliance is completed, either via its status/completedAt or via any employee assignment.
+     * Checks whether a CompanyCompliance is completed, either via its
+     * status/completedAt or via any employee assignment.
      */
     private boolean isCompanyComplianceCompleted(CompanyCompliance cc, ComplianceConfig config) {
-        if (cc == null) return false;
+        if (cc == null)
+            return false;
         if (cc.getStatus() == ComplianceStatus.COMPLETED || cc.getCompletedAt() != null) {
             return true;
         }
@@ -844,28 +921,37 @@ public class SchedulerService {
     }
 
     private String getComplianceName(EmployeeAssignment assignment) {
-        if (assignment == null) return "Compliance";
+        if (assignment == null)
+            return "Compliance";
         var config = assignment.getConfig();
-        if (config == null) return "Compliance";
-        if (config.getSubTemplate() != null) return config.getSubTemplate().getName();
-        if (config.getTemplate() != null) return config.getTemplate().getName();
+        if (config == null)
+            return "Compliance";
+        if (config.getSubTemplate() != null)
+            return config.getSubTemplate().getName();
+        if (config.getTemplate() != null)
+            return config.getTemplate().getName();
         var cc = config.getCompanyCompliance();
         if (cc != null) {
-            if (cc.getSubTemplate() != null) return cc.getSubTemplate().getName();
-            if (cc.getTemplate() != null) return cc.getTemplate().getName();
+            if (cc.getSubTemplate() != null)
+                return cc.getSubTemplate().getName();
+            if (cc.getTemplate() != null)
+                return cc.getTemplate().getName();
         }
         return "Compliance";
     }
 
     private String getUserName(Long userId) {
-        if (userId == null) return "Employee";
+        if (userId == null)
+            return "Employee";
         return userRepository.findById(userId).map(User::getFullName).orElse("Employee");
     }
 
     private Long getCompanyIdFromAssignment(EmployeeAssignment assignment) {
-        if (assignment == null) return null;
+        if (assignment == null)
+            return null;
         var config = assignment.getConfig();
-        if (config != null && config.getCompanyCompliance() != null && config.getCompanyCompliance().getCompany() != null) {
+        if (config != null && config.getCompanyCompliance() != null
+                && config.getCompanyCompliance().getCompany() != null) {
             return config.getCompanyCompliance().getCompany().getId();
         }
         if (assignment.getEmployeeId() != null) {
@@ -877,9 +963,11 @@ public class SchedulerService {
     }
 
     private String getCompanyNameFromAssignment(EmployeeAssignment assignment) {
-        if (assignment == null) return "Company";
+        if (assignment == null)
+            return "Company";
         var config = assignment.getConfig();
-        if (config != null && config.getCompanyCompliance() != null && config.getCompanyCompliance().getCompany() != null) {
+        if (config != null && config.getCompanyCompliance() != null
+                && config.getCompanyCompliance().getCompany() != null) {
             return config.getCompanyCompliance().getCompany().getName();
         }
         if (assignment.getEmployeeId() != null) {

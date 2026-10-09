@@ -74,7 +74,12 @@ public interface CompanyRepository extends JpaRepository<Company, Long> {
     @Query("SELECT COUNT(u) FROM User u WHERE u.company.id = :companyId AND u.role = 'EMPLOYEE' AND u.status = 'ACTIVE' AND u.deleted = false")
     long countActiveEmployeesByCompanyId(@Param("companyId") Long companyId);
 
-    @Query("SELECT c FROM Company c WHERE c.deleted = false " +
+    @Query(value = "SELECT c FROM Company c LEFT JOIN FETCH c.companyAdmin WHERE c.deleted = false " +
+            "AND (:status IS NULL OR c.status = :status) " +
+            "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(c.email) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "     OR LOWER(c.gstNumber) LIKE LOWER(CONCAT('%', :search, '%')))",
+           countQuery = "SELECT COUNT(c) FROM Company c WHERE c.deleted = false " +
             "AND (:status IS NULL OR c.status = :status) " +
             "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
             "     OR LOWER(c.email) LIKE LOWER(CONCAT('%', :search, '%')) " +

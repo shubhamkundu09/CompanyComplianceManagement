@@ -98,7 +98,7 @@ public class SubAdminManagementTest {
         verify(emailService, times(1)).sendCredentialsEmail(eq(dto.getEmail()), anyString(), anyString(), anyString());
         verify(companyService, times(1)).canAddEmployee(eq(1L));
         verify(companyService, times(1)).updateActiveEmployeeCount(eq(1L));
-        verify(notificationEventService, atLeastOnce()).notifyUserPushOnly(eq(10L), anyString(), anyString(), any(), anyString());
+        verify(notificationEventService, atLeastOnce()).notifyUsersPushOnly(anyList(), anyString(), anyString(), any(), anyString());
     }
 
     @Test

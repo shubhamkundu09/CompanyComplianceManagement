@@ -35,34 +35,72 @@ public class DeviceTokenService {
             p = Platform.ANDROID;
         }
 
-        // Dissociate this physical device token from any other users to prevent cross-account notifications
+        String targetDeviceName = (deviceName != null && !deviceName.trim().isEmpty())
+                ? deviceName.trim()
+                : (p == Platform.IOS ? "iPhone" : "Android Device");
+
+        // 1. Dissociate this physical device token from any other users to prevent cross-account notifications
         deviceTokenRepository.deleteByDeviceTokenAndUserIdNot(cleanToken, userId);
 
-        var existing = deviceTokenRepository.findByUserIdAndDeviceToken(userId, cleanToken);
-        if (existing.isPresent()) {
-            var device = existing.get();
+        // 2. Check if this exact token is already registered for this user
+        var existingExact = deviceTokenRepository.findByUserIdAndDeviceToken(userId, cleanToken);
+        if (existingExact.isPresent()) {
+            var device = existingExact.get();
             device.setPlatform(p);
-            if (deviceName != null && !deviceName.trim().isEmpty()) {
-                device.setDeviceName(deviceName.trim());
-            }
+            device.setDeviceName(targetDeviceName);
             if (appVersion != null && !appVersion.trim().isEmpty()) {
                 device.setAppVersion(appVersion.trim());
             }
             device.setLastSeen(LocalDateTime.now(IST_ZONE));
             deviceTokenRepository.save(device);
-            log.info("Updated device token for user {}: platform={}, device={}, token={}", userId, p, device.getDeviceName(), cleanToken);
+            log.info("Updated existing device token for user {}: platform={}, device={}, token={}", userId, p, device.getDeviceName(), cleanToken);
+            pruneStaleTokensForUser(userId);
             return;
         }
 
+        // 3. Check if the user already has a device record on the same platform with the same device name (e.g., token rotation / app reinstall)
+        var existingSameDevice = deviceTokenRepository.findFirstByUserIdAndPlatformAndDeviceName(userId, p, targetDeviceName);
+        if (existingSameDevice.isPresent()) {
+            var device = existingSameDevice.get();
+            device.setDeviceToken(cleanToken);
+            if (appVersion != null && !appVersion.trim().isEmpty()) {
+                device.setAppVersion(appVersion.trim());
+            }
+            device.setLastSeen(LocalDateTime.now(IST_ZONE));
+            deviceTokenRepository.save(device);
+            log.info("Replaced rotated device token for user {} on {}: token={}", userId, targetDeviceName, cleanToken);
+            pruneStaleTokensForUser(userId);
+            return;
+        }
+
+        // 4. Register new distinct device
         var newDevice = new DeviceToken();
         newDevice.setUserId(userId);
         newDevice.setDeviceToken(cleanToken);
         newDevice.setPlatform(p);
-        newDevice.setDeviceName(deviceName != null && !deviceName.trim().isEmpty() ? deviceName.trim() : (p == Platform.IOS ? "iPhone" : "Android Device"));
+        newDevice.setDeviceName(targetDeviceName);
         newDevice.setAppVersion(appVersion != null && !appVersion.trim().isEmpty() ? appVersion.trim() : "1.0.0");
         newDevice.setLastSeen(LocalDateTime.now(IST_ZONE));
         deviceTokenRepository.save(newDevice);
         log.info("Registered new device token for user {}: platform={}, device={}, token={}", userId, p, newDevice.getDeviceName(), cleanToken);
+
+        // 5. Keep max 3 latest active devices per user to prevent accumulating stale/ghost tokens
+        pruneStaleTokensForUser(userId);
+    }
+
+    private void pruneStaleTokensForUser(Long userId) {
+        try {
+            List<DeviceToken> userTokens = deviceTokenRepository.findByUserIdOrderByLastSeenDesc(userId);
+            if (userTokens.size() > 3) {
+                List<DeviceToken> stale = userTokens.subList(3, userTokens.size());
+                for (DeviceToken dt : stale) {
+                    deviceTokenRepository.delete(dt);
+                    log.info("Pruned stale device token ID={} (last seen: {}) for user ID={}", dt.getId(), dt.getLastSeen(), userId);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Error pruning stale device tokens for user {}: {}", userId, e.getMessage());
+        }
     }
 
     @Transactional

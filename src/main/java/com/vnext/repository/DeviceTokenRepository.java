@@ -15,10 +15,14 @@ public interface DeviceTokenRepository extends JpaRepository<DeviceToken, Long> 
 
     List<DeviceToken> findByUserId(Long userId);
 
+    List<DeviceToken> findByUserIdOrderByLastSeenDesc(Long userId);
+
     @Query("SELECT dt FROM DeviceToken dt WHERE dt.userId IN :userIds")
     List<DeviceToken> findByUserIdIn(List<Long> userIds);
 
     Optional<DeviceToken> findByUserIdAndDeviceToken(Long userId, String deviceToken);
+
+    Optional<DeviceToken> findFirstByUserIdAndPlatformAndDeviceName(Long userId, com.vnext.entity.Platform platform, String deviceName);
 
     long countByPlatform(com.vnext.entity.Platform platform);
 

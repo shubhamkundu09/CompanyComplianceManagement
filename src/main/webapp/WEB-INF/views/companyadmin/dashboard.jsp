@@ -2736,13 +2736,16 @@ pageEncoding="UTF-8" %> <% pageContext.setAttribute("pageTitle", "Dashboard" );
                       }
 
                       if (item.subTemplateId !== null && item.subTemplateId !== undefined) {
-                          // Determine effective status (check due date for OVERDUE)
+                          // Determine effective status (check due date for OVERDUE vs IN_PROGRESS)
                           var subStatus = item.status || "PENDING";
-                          if (item.dueDate) {
-                              var due = new Date(item.dueDate);
+                          var dueDate = item.dueDate || item.effectiveDueDate;
+                          if (subStatus !== "COMPLETED" && dueDate) {
+                              var due = new Date(dueDate);
                               due.setHours(0, 0, 0, 0);
-                              if (due < today && subStatus !== "COMPLETED") {
+                              if (due < today) {
                                   subStatus = "OVERDUE";
+                              } else {
+                                  subStatus = "IN_PROGRESS";
                               }
                           }
                           grouped[templateId].subCompliances.push({
@@ -2750,15 +2753,26 @@ pageEncoding="UTF-8" %> <% pageContext.setAttribute("pageTitle", "Dashboard" );
                               subTemplateId: item.subTemplateId,
                               name: item.subTemplateName || "Sub-Compliance",
                               status: subStatus,
-                              dueDate: item.dueDate,
+                              dueDate: dueDate,
                               frequency: item.frequency,
                               isConfigured: item.configured !== false,
                               companyComplianceId: item.companyComplianceId || item.id,
                           });
                       } else {
+                          var pStatus = item.status || "PENDING";
+                          var pDueDate = item.dueDate || item.effectiveDueDate;
+                          if (pStatus !== "COMPLETED" && pDueDate) {
+                              var pDue = new Date(pDueDate);
+                              pDue.setHours(0, 0, 0, 0);
+                              if (pDue < today) {
+                                  pStatus = "OVERDUE";
+                              } else {
+                                  pStatus = "IN_PROGRESS";
+                              }
+                          }
                           grouped[templateId].isConfigured = item.configured !== false;
-                          grouped[templateId].status = item.status || "PENDING";
-                          grouped[templateId].dueDate = item.dueDate;
+                          grouped[templateId].status = pStatus;
+                          grouped[templateId].dueDate = pDueDate;
                           grouped[templateId].frequency = item.frequency;
                           grouped[templateId].description = item.description;
                           grouped[templateId].priority = item.priority || 0;

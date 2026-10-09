@@ -34,6 +34,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class CompanyAdminController {
 
+    private static final java.time.ZoneId IST_ZONE = java.time.ZoneId.of("Asia/Kolkata");
+
     private final CompanyService companyService;
     private final EmployeeService employeeService;
     private final ComplianceService complianceService;
@@ -217,68 +219,149 @@ public class CompanyAdminController {
         Company company = companyService.getCompanyEntityById(companyId);
         String companyName = company.getName();
 
-        // Get all company compliances (active and not deleted)
+        // 1. Get all company compliances (active and not deleted)
         List<CompanyCompliance> allCompliances = companyComplianceRepository
                 .findByCompanyIdAndIsActiveTrueAndDeletedFalse(companyId);
+
+        if (allCompliances.isEmpty()) {
+            return ApiResponse.success(new ArrayList<>(), "Assigned compliances retrieved successfully");
+        }
 
         // Separate parent and sub-compliances
         List<CompanyCompliance> subCompliances = new ArrayList<>();
         List<CompanyCompliance> parentCompliances = new ArrayList<>();
+        List<Long> ccIds = new ArrayList<>();
+        List<Long> subTemplateIds = new ArrayList<>();
+        List<Long> templateIds = new ArrayList<>();
+
         for (CompanyCompliance cc : allCompliances) {
+            ccIds.add(cc.getId());
+            if (cc.getTemplate() != null) {
+                templateIds.add(cc.getTemplate().getId());
+            }
             if (cc.isParent()) {
                 parentCompliances.add(cc);
             } else {
                 subCompliances.add(cc);
+                if (cc.getSubTemplate() != null) {
+                    subTemplateIds.add(cc.getSubTemplate().getId());
+                }
             }
         }
 
         // Map: templateId -> hasSubCompliances (for this company)
         Map<Long, Boolean> templateHasSubs = new HashMap<>();
         for (CompanyCompliance parent : parentCompliances) {
-            Long templateId = parent.getTemplate().getId();
-            boolean hasSubs = subCompliances.stream()
-                    .anyMatch(s -> s.getParentTemplateId() != null && s.getParentTemplateId().equals(templateId));
-            templateHasSubs.put(templateId, hasSubs);
+            if (parent.getTemplate() != null) {
+                Long templateId = parent.getTemplate().getId();
+                boolean hasSubs = subCompliances.stream()
+                        .anyMatch(s -> s.getParentTemplateId() != null && s.getParentTemplateId().equals(templateId));
+                templateHasSubs.put(templateId, hasSubs);
+            }
         }
 
+        // 2. CONFIGS: From eagerly fetched cc.config + fallback template configs
+        Map<Long, ComplianceConfig> configByCcId = new HashMap<>();
+        for (CompanyCompliance cc : allCompliances) {
+            if (cc.getConfig() != null) {
+                configByCcId.put(cc.getId(), cc.getConfig());
+            }
+        }
+
+        Map<Long, ComplianceConfig> fallbackSubConfigs = new HashMap<>();
+        if (!subTemplateIds.isEmpty()) {
+            List<ComplianceConfig> subFallbacks = configRepository.findBySubTemplateIdInAndCompanyComplianceIsNull(subTemplateIds);
+            for (ComplianceConfig cfg : subFallbacks) {
+                if (cfg.getSubTemplate() != null) {
+                    fallbackSubConfigs.putIfAbsent(cfg.getSubTemplate().getId(), cfg);
+                }
+            }
+        }
+
+        Map<Long, ComplianceConfig> fallbackTemplateConfigs = new HashMap<>();
+        if (!templateIds.isEmpty()) {
+            List<ComplianceConfig> templateFallbacks = configRepository.findByTemplateIdInAndCompanyComplianceIsNull(templateIds);
+            for (ComplianceConfig cfg : templateFallbacks) {
+                if (cfg.getTemplate() != null) {
+                    fallbackTemplateConfigs.putIfAbsent(cfg.getTemplate().getId(), cfg);
+                }
+            }
+        }
+
+        // 3. BULK FETCH ALL ACTIVE ASSIGNMENTS
+        List<Long> allConfigIds = new ArrayList<>();
+        configByCcId.values().forEach(c -> allConfigIds.add(c.getId()));
+        fallbackSubConfigs.values().forEach(c -> allConfigIds.add(c.getId()));
+        fallbackTemplateConfigs.values().forEach(c -> allConfigIds.add(c.getId()));
+
+        Map<Long, List<EmployeeAssignment>> assignmentsByConfigId = new HashMap<>();
+        if (!allConfigIds.isEmpty()) {
+            List<EmployeeAssignment> allAssignments = assignmentRepository.findByConfigIdInAndIsActiveTrue(allConfigIds);
+            for (EmployeeAssignment assign : allAssignments) {
+                if (assign.getConfig() != null) {
+                    assignmentsByConfigId.computeIfAbsent(assign.getConfig().getId(), k -> new ArrayList<>()).add(assign);
+                }
+            }
+        }
+
+        // 4. BULK FETCH USERS FOR COMPLETED ASSIGNMENTS
+        Set<Long> userIds = new HashSet<>();
+        for (List<EmployeeAssignment> assignList : assignmentsByConfigId.values()) {
+            for (EmployeeAssignment a : assignList) {
+                if (a.getCompletedAt() != null) {
+                    if (a.getCompletedBy() != null) userIds.add(a.getCompletedBy());
+                    if (a.getEmployeeId() != null) userIds.add(a.getEmployeeId());
+                }
+            }
+        }
+        for (CompanyCompliance cc : allCompliances) {
+            if (cc.getCompletedBy() != null) {
+                userIds.add(cc.getCompletedBy());
+            }
+        }
+
+        Map<Long, String> userNames = new HashMap<>();
+        if (!userIds.isEmpty()) {
+            List<User> users = userRepository.findAllById(userIds);
+            for (User u : users) {
+                userNames.put(u.getId(), u.getFullName());
+            }
+        }
+
+        LocalDate today = LocalDate.now(IST_ZONE);
         List<ComplianceConfigDTO> configs = new ArrayList<>();
 
-        // 1. SUB-COMPLIANCES (these are already company-specific)
+        // 5. PROCESS SUB-COMPLIANCES IN MEMORY (O(1) lookups)
         for (CompanyCompliance sub : subCompliances) {
             ComplianceConfigDTO dto = buildBaseDTO(sub, companyId, companyName);
-            Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(sub.getId());
-            if (configOpt.isEmpty() && sub.getSubTemplate() != null) {
-                configOpt = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(sub.getSubTemplate().getId());
+            ComplianceConfig config = configByCcId.get(sub.getId());
+            if (config == null && sub.getSubTemplate() != null) {
+                config = fallbackSubConfigs.get(sub.getSubTemplate().getId());
             }
-            boolean isFullyConfigured = configOpt.isPresent();
-            if (isFullyConfigured) {
-                fillConfigDTO(dto, configOpt.get());
+
+            if (config != null) {
+                fillConfigDTO(dto, config);
                 dto.setConfigured(true);
 
-                Optional<EmployeeAssignment> completedAssignment = assignmentRepository
-                        .findByConfigIdAndIsActiveTrue(configOpt.get().getId())
-                        .stream().filter(a -> a.getCompletedAt() != null).findFirst();
-
-                if (completedAssignment.isPresent()) {
-                    EmployeeAssignment assign = completedAssignment.get();
-                    dto.setStatus(ComplianceStatus.COMPLETED);
-                    dto.setCompletedAt(assign.getCompletedAt());
-                    dto.setSubmissionReference(assign.getSubmissionReference());
-                    dto.setSubmissionDocumentUrl(assign.getSubmissionDocumentUrl());
-
-                    if (assign.getCompletedBy() != null) {
-                        userRepository.findById(assign.getCompletedBy()).ifPresent(u -> dto.setCompletedByName(u.getFullName()));
-                    } else if (assign.getEmployeeId() != null) {
-                        userRepository.findById(assign.getEmployeeId()).ifPresent(u -> dto.setCompletedByName(u.getFullName()));
+                List<EmployeeAssignment> assignments = assignmentsByConfigId.getOrDefault(config.getId(), Collections.emptyList());
+                EmployeeAssignment completedAssign = null;
+                for (EmployeeAssignment a : assignments) {
+                    if (a.getCompletedAt() != null) {
+                        completedAssign = a;
+                        break;
                     }
+                }
 
-                    if (sub.getStatus() != ComplianceStatus.COMPLETED) {
-                        sub.setStatus(ComplianceStatus.COMPLETED);
-                        sub.setCompletedAt(assign.getCompletedAt());
-                        if (assign.getCompletedBy() != null) {
-                            sub.setCompletedBy(assign.getCompletedBy());
-                        }
-                        companyComplianceRepository.save(sub);
+                if (completedAssign != null) {
+                    dto.setStatus(ComplianceStatus.COMPLETED);
+                    dto.setCompletedAt(completedAssign.getCompletedAt());
+                    dto.setSubmissionReference(completedAssign.getSubmissionReference());
+                    dto.setSubmissionDocumentUrl(completedAssign.getSubmissionDocumentUrl());
+
+                    if (completedAssign.getCompletedBy() != null) {
+                        dto.setCompletedByName(userNames.get(completedAssign.getCompletedBy()));
+                    } else if (completedAssign.getEmployeeId() != null) {
+                        dto.setCompletedByName(userNames.get(completedAssign.getEmployeeId()));
                     }
                 } else if (sub.getStatus() == ComplianceStatus.COMPLETED || sub.getCompletedAt() != null) {
                     dto.setStatus(ComplianceStatus.COMPLETED);
@@ -286,7 +369,19 @@ public class CompanyAdminController {
                     dto.setSubmissionReference(sub.getAdminSubmissionReference());
                     dto.setSubmissionDocumentUrl(sub.getAdminSubmissionDocumentUrl());
                     if (sub.getCompletedBy() != null) {
-                        userRepository.findById(sub.getCompletedBy()).ifPresent(u -> dto.setCompletedByName(u.getFullName()));
+                        dto.setCompletedByName(userNames.get(sub.getCompletedBy()));
+                    }
+                } else {
+                    // Real-time status based on effective due date
+                    LocalDate due = dto.getEffectiveDueDate() != null ? dto.getEffectiveDueDate() : dto.getDueDate();
+                    if (due != null) {
+                        if (due.isBefore(today)) {
+                            dto.setStatus(ComplianceStatus.OVERDUE);
+                        } else {
+                            dto.setStatus(ComplianceStatus.IN_PROGRESS);
+                        }
+                    } else {
+                        dto.setStatus(sub.getStatus() != null ? sub.getStatus() : ComplianceStatus.PENDING);
                     }
                 }
             } else {
@@ -297,53 +392,52 @@ public class CompanyAdminController {
                     dto.setSubmissionReference(sub.getAdminSubmissionReference());
                     dto.setSubmissionDocumentUrl(sub.getAdminSubmissionDocumentUrl());
                     if (sub.getCompletedBy() != null) {
-                        userRepository.findById(sub.getCompletedBy()).ifPresent(u -> dto.setCompletedByName(u.getFullName()));
+                        dto.setCompletedByName(userNames.get(sub.getCompletedBy()));
                     }
+                } else {
+                    dto.setStatus(sub.getStatus() != null ? sub.getStatus() : ComplianceStatus.PENDING);
                 }
             }
             configs.add(dto);
         }
 
-        // 2. STANDALONE PARENT COMPLIANCES (no sub-compliances for this company)
+        // 6. PROCESS STANDALONE PARENT COMPLIANCES IN MEMORY (O(1) lookups)
         for (CompanyCompliance parent : parentCompliances) {
+            if (parent.getTemplate() == null) continue;
             Long templateId = parent.getTemplate().getId();
             if (!templateHasSubs.getOrDefault(templateId, false)) {
                 ComplianceConfigDTO dto = buildBaseDTO(parent, companyId, companyName);
                 dto.setSubTemplateId(null);
                 dto.setSubTemplateName(null);
-                Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(parent.getId());
-                if (configOpt.isEmpty() && parent.getTemplate() != null) {
-                    configOpt = configRepository.findByTemplateIdAndCompanyComplianceIsNull(parent.getTemplate().getId());
+
+                ComplianceConfig config = configByCcId.get(parent.getId());
+                if (config == null) {
+                    config = fallbackTemplateConfigs.get(parent.getTemplate().getId());
                 }
-                boolean isParentFullyConfigured = configOpt.isPresent();
-                if (isParentFullyConfigured) {
-                    fillConfigDTO(dto, configOpt.get());
+
+                if (config != null) {
+                    fillConfigDTO(dto, config);
                     dto.setConfigured(true);
 
-                    Optional<EmployeeAssignment> completedAssignment = assignmentRepository
-                            .findByConfigIdAndIsActiveTrue(configOpt.get().getId())
-                            .stream().filter(a -> a.getCompletedAt() != null).findFirst();
-
-                    if (completedAssignment.isPresent()) {
-                        EmployeeAssignment assign = completedAssignment.get();
-                        dto.setStatus(ComplianceStatus.COMPLETED);
-                        dto.setCompletedAt(assign.getCompletedAt());
-                        dto.setSubmissionReference(assign.getSubmissionReference());
-                        dto.setSubmissionDocumentUrl(assign.getSubmissionDocumentUrl());
-
-                        if (assign.getCompletedBy() != null) {
-                            userRepository.findById(assign.getCompletedBy()).ifPresent(u -> dto.setCompletedByName(u.getFullName()));
-                        } else if (assign.getEmployeeId() != null) {
-                            userRepository.findById(assign.getEmployeeId()).ifPresent(u -> dto.setCompletedByName(u.getFullName()));
+                    List<EmployeeAssignment> assignments = assignmentsByConfigId.getOrDefault(config.getId(), Collections.emptyList());
+                    EmployeeAssignment completedAssign = null;
+                    for (EmployeeAssignment a : assignments) {
+                        if (a.getCompletedAt() != null) {
+                            completedAssign = a;
+                            break;
                         }
+                    }
 
-                        if (parent.getStatus() != ComplianceStatus.COMPLETED) {
-                            parent.setStatus(ComplianceStatus.COMPLETED);
-                            parent.setCompletedAt(assign.getCompletedAt());
-                            if (assign.getCompletedBy() != null) {
-                                parent.setCompletedBy(assign.getCompletedBy());
-                            }
-                            companyComplianceRepository.save(parent);
+                    if (completedAssign != null) {
+                        dto.setStatus(ComplianceStatus.COMPLETED);
+                        dto.setCompletedAt(completedAssign.getCompletedAt());
+                        dto.setSubmissionReference(completedAssign.getSubmissionReference());
+                        dto.setSubmissionDocumentUrl(completedAssign.getSubmissionDocumentUrl());
+
+                        if (completedAssign.getCompletedBy() != null) {
+                            dto.setCompletedByName(userNames.get(completedAssign.getCompletedBy()));
+                        } else if (completedAssign.getEmployeeId() != null) {
+                            dto.setCompletedByName(userNames.get(completedAssign.getEmployeeId()));
                         }
                     } else if (parent.getStatus() == ComplianceStatus.COMPLETED || parent.getCompletedAt() != null) {
                         dto.setStatus(ComplianceStatus.COMPLETED);
@@ -351,7 +445,19 @@ public class CompanyAdminController {
                         dto.setSubmissionReference(parent.getAdminSubmissionReference());
                         dto.setSubmissionDocumentUrl(parent.getAdminSubmissionDocumentUrl());
                         if (parent.getCompletedBy() != null) {
-                            userRepository.findById(parent.getCompletedBy()).ifPresent(u -> dto.setCompletedByName(u.getFullName()));
+                            dto.setCompletedByName(userNames.get(parent.getCompletedBy()));
+                        }
+                    } else {
+                        // Real-time status based on effective due date
+                        LocalDate due = dto.getEffectiveDueDate() != null ? dto.getEffectiveDueDate() : dto.getDueDate();
+                        if (due != null) {
+                            if (due.isBefore(today)) {
+                                dto.setStatus(ComplianceStatus.OVERDUE);
+                            } else {
+                                dto.setStatus(ComplianceStatus.IN_PROGRESS);
+                            }
+                        } else {
+                            dto.setStatus(parent.getStatus() != null ? parent.getStatus() : ComplianceStatus.PENDING);
                         }
                     }
                 } else {
@@ -362,18 +468,15 @@ public class CompanyAdminController {
                         dto.setSubmissionReference(parent.getAdminSubmissionReference());
                         dto.setSubmissionDocumentUrl(parent.getAdminSubmissionDocumentUrl());
                         if (parent.getCompletedBy() != null) {
-                            userRepository.findById(parent.getCompletedBy()).ifPresent(u -> dto.setCompletedByName(u.getFullName()));
+                            dto.setCompletedByName(userNames.get(parent.getCompletedBy()));
                         }
+                    } else {
+                        dto.setStatus(parent.getStatus() != null ? parent.getStatus() : ComplianceStatus.PENDING);
                     }
                 }
                 configs.add(dto);
             }
         }
-
-        // NOTE: The "Custom Templates" section (section 3) is removed because
-        // company admin can no longer create parent custom templates.
-        // Existing custom templates (isCompanySpecific=true) are now treated as
-        // editable, and they will appear as parent compliances in section 2.
 
         // Sort by priority
         configs.sort((a, b) -> {
@@ -397,13 +500,43 @@ public class CompanyAdminController {
         // Group by template ID while preserving order
         Map<Long, ComplianceTemplate> templateMap = new LinkedHashMap<>();
         Map<Long, CompanyCompliance> parentCCMap = new LinkedHashMap<>();
+        Map<Long, List<CompanyCompliance>> subsByParentTemplateId = new HashMap<>();
+        List<Long> allCCIds = new ArrayList<>();
 
         for (CompanyCompliance cc : allCCs) {
+            allCCIds.add(cc.getId());
             if (cc.getTemplate() != null && Boolean.TRUE.equals(cc.getTemplate().getIsActive()) && !cc.getTemplate().isDeleted()) {
                 Long tId = cc.getTemplate().getId();
                 templateMap.putIfAbsent(tId, cc.getTemplate());
                 if (cc.isParent() || cc.getSubTemplate() == null) {
                     parentCCMap.putIfAbsent(tId, cc);
+                }
+            }
+            if (!cc.isParent() && cc.getParentTemplateId() != null) {
+                subsByParentTemplateId.computeIfAbsent(cc.getParentTemplateId(), k -> new ArrayList<>()).add(cc);
+            }
+        }
+
+        // Bulk fetch all configs
+        Map<Long, ComplianceConfig> configByCcId = new HashMap<>();
+        if (!allCCIds.isEmpty()) {
+            List<ComplianceConfig> configs = configRepository.findAllByCompanyComplianceIdIn(allCCIds);
+            for (ComplianceConfig cfg : configs) {
+                if (cfg.getCompanyCompliance() != null) {
+                    configByCcId.put(cfg.getCompanyCompliance().getId(), cfg);
+                }
+            }
+        }
+
+        // Bulk fetch all assignments
+        List<Long> configIds = new ArrayList<>();
+        configByCcId.values().forEach(c -> configIds.add(c.getId()));
+        Map<Long, List<EmployeeAssignment>> assignmentsByConfigId = new HashMap<>();
+        if (!configIds.isEmpty()) {
+            List<EmployeeAssignment> assignments = assignmentRepository.findByConfigIdInAndIsActiveTrue(configIds);
+            for (EmployeeAssignment assign : assignments) {
+                if (assign.getConfig() != null) {
+                    assignmentsByConfigId.computeIfAbsent(assign.getConfig().getId(), k -> new ArrayList<>()).add(assign);
                 }
             }
         }
@@ -415,13 +548,15 @@ public class CompanyAdminController {
 
             CompanyCompliance cc = parentCCMap.get(tId);
             if (cc == null) {
-                // Ensure parent CompanyCompliance exists for this company
                 cc = companyComplianceRepository
                         .findByCompanyIdAndTemplateIdAndIsParentTrueAndDeletedFalse(companyId, tId)
                         .orElse(null);
                 if (cc == null) {
+                    Company comp = (admin.getCompany() != null && admin.getCompany().getId() != null)
+                            ? admin.getCompany()
+                            : companyService.getCompanyEntityById(companyId);
                     cc = new CompanyCompliance();
-                    cc.setCompany(admin.getCompany());
+                    cc.setCompany(comp);
                     cc.setTemplate(template);
                     cc.setIsParent(true);
                     cc.setIsActive(true);
@@ -440,39 +575,41 @@ public class CompanyAdminController {
             dto.setIsSuperAdminConfig(cc.getIsSuperAdminConfig());
             dto.setIsActive(cc.getIsActive());
 
-            // Sub-compliances for this company & parent template
-            List<CompanyCompliance> subCCs = companyComplianceRepository
-                    .findSubCompliancesByCompanyIdAndParentTemplateId(companyId, tId);
+            // Sub-compliances for this company & parent template from in-memory map
+            List<CompanyCompliance> subCCs = subsByParentTemplateId.getOrDefault(tId, Collections.emptyList());
 
-            if (subCCs != null && !subCCs.isEmpty()) {
+            if (!subCCs.isEmpty()) {
                 boolean allCompleted = subCCs.stream().allMatch(sub -> {
                     if (sub.getStatus() == ComplianceStatus.COMPLETED) return true;
-                    Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(sub.getId());
-                    if (configOpt.isPresent()) {
-                        return assignmentRepository.findByConfigIdAndIsActiveTrue(configOpt.get().getId())
-                                .stream().anyMatch(a -> a.getCompletedAt() != null);
+                    ComplianceConfig cfg = configByCcId.get(sub.getId());
+                    if (cfg != null) {
+                        List<EmployeeAssignment> assigns = assignmentsByConfigId.getOrDefault(cfg.getId(), Collections.emptyList());
+                        return assigns.stream().anyMatch(a -> a.getCompletedAt() != null);
                     }
                     return false;
                 });
                 if (allCompleted) {
-                    cc.setStatus(ComplianceStatus.COMPLETED);
-                    companyComplianceRepository.save(cc);
+                    dto.setStatus(ComplianceStatus.COMPLETED);
+                } else {
+                    dto.setStatus(cc.getStatus());
                 }
             } else {
-                Optional<ComplianceConfig> configOpt = configRepository.findByCompanyComplianceId(cc.getId());
-                if (configOpt.isPresent()) {
-                    boolean isDone = assignmentRepository.findByConfigIdAndIsActiveTrue(configOpt.get().getId())
-                            .stream().anyMatch(a -> a.getCompletedAt() != null);
+                ComplianceConfig cfg = configByCcId.get(cc.getId());
+                if (cfg != null) {
+                    List<EmployeeAssignment> assigns = assignmentsByConfigId.getOrDefault(cfg.getId(), Collections.emptyList());
+                    boolean isDone = assigns.stream().anyMatch(a -> a.getCompletedAt() != null);
                     if (isDone) {
-                        cc.setStatus(ComplianceStatus.COMPLETED);
-                        companyComplianceRepository.save(cc);
+                        dto.setStatus(ComplianceStatus.COMPLETED);
+                    } else {
+                        dto.setStatus(cc.getStatus());
                     }
+                } else {
+                    dto.setStatus(cc.getStatus());
                 }
             }
 
-            dto.setStatus(cc.getStatus());
             dto.setAssignedAt(cc.getCreatedAt());
-            dto.setTotalSubCompliances(subCCs != null ? subCCs.size() : 0);
+            dto.setTotalSubCompliances(subCCs.size());
 
             Boolean editable = template.isEditable();
             Boolean semiEditable = template.isSemiEditable();
@@ -771,7 +908,7 @@ public class CompanyAdminController {
             @RequestBody List<Long> parentComplianceIds,
             @CurrentUser User admin) {
         Long companyId = getCompanyId(admin);
-        complianceService.syncParentCompliancesForEmployee(employeeId, parentComplianceIds, companyId, admin.getId());
+        complianceService.assignMultipleParentCompliancesToEmployee(employeeId, parentComplianceIds, companyId, admin.getId());
         return ApiResponse.success("Compliance assignments updated successfully");
     }
 
@@ -867,8 +1004,8 @@ public class CompanyAdminController {
             return ApiResponse.error("Employee does not belong to your company", 403);
         }
 
-        Page<EmployeeComplianceDTO> compliances = assignmentService.getEmployeeAssignments(
-                employeeId, status, pageable);
+        Page<EmployeeComplianceDTO> compliances = assignmentService.getEmployeeParentCompliances(
+                employeeId, companyId, status, pageable);
 
         return ApiResponse.success(compliances, "Employee compliances retrieved successfully");
     }
@@ -1003,8 +1140,10 @@ public class CompanyAdminController {
 
         if (config.getCompanyCompliance() != null) {
             dto.setCompanyComplianceId(config.getCompanyCompliance().getId());
-            dto.setCompanyId(config.getCompanyCompliance().getCompany().getId());
-            dto.setCompanyName(config.getCompanyCompliance().getCompany().getName());
+            if (config.getCompanyCompliance().getCompany() != null) {
+                dto.setCompanyId(config.getCompanyCompliance().getCompany().getId());
+                dto.setCompanyName(config.getCompanyCompliance().getCompany().getName());
+            }
             dto.setStatus(config.getCompanyCompliance().getStatus());
 
             if (config.getCompanyCompliance().getTemplate() != null) {
