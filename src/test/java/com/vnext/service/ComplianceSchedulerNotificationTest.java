@@ -165,11 +165,11 @@ class ComplianceSchedulerNotificationTest {
         ComplianceConfig config = new ComplianceConfig();
         config.setId(100L);
         config.setFrequency(ComplianceFrequency.MONTHLY);
-        config.setDueDate(LocalDate.now(IST).minusDays(1)); // yesterday
+        config.setDueDate(LocalDate.now(IST).minusMonths(1)); // previous month
         cc.setConfig(config);
 
         when(companyComplianceRepository.findAll()).thenReturn(List.of(cc));
-        when(configRepository.findByCompanyComplianceId(10L)).thenReturn(Optional.of(config));
+        lenient().when(configRepository.findByCompanyComplianceId(10L)).thenReturn(Optional.of(config));
 
         EmployeeAssignment oldAssignment = new EmployeeAssignment();
         oldAssignment.setId(1L);

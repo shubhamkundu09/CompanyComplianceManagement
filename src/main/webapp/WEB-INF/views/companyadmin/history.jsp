@@ -1,8 +1,5 @@
 <%@ page contentType="text/html;charset=UTF-8" language="java" %>
 <%@ taglib prefix="c" uri="http://java.sun.com/jsp/jstl/core" %>
-<c:if test="${empty baseUrl}">
-    <c:set var="baseUrl" value="${pageContext.request.contextPath}" />
-</c:if>
 <!DOCTYPE html>
 <html lang="en">
 <head>

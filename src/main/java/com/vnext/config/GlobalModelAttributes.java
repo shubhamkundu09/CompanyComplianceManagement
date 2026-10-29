@@ -1,6 +1,5 @@
 package com.vnext.config;
 
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -12,7 +11,7 @@ public class GlobalModelAttributes {
     private String configuredBaseUrl;
 
     @ModelAttribute("baseUrl")
-    public String baseUrl(HttpServletRequest request) {
+    public String baseUrl() {
         if (configuredBaseUrl != null && !configuredBaseUrl.trim().isEmpty()) {
             String url = configuredBaseUrl.trim();
             while (url.endsWith("/")) {
@@ -20,7 +19,6 @@ public class GlobalModelAttributes {
             }
             return url;
         }
-        String cp = request != null ? request.getContextPath() : "";
-        return (cp != null) ? cp : "";
+        return "";
     }
 }
