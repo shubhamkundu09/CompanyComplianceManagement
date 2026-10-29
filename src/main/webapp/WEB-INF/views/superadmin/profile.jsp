@@ -809,6 +809,9 @@
         <a href="${baseUrl}/super-admin/compliance/templates" class="nav-item">
             <i class="fas fa-tags"></i> Categories
         </a>
+        <a href="${baseUrl}/super-admin/history" class="nav-item">
+            <i class="fas fa-history"></i> Compliance History
+        </a>
 
         <div class="sidebar-label">Push Settings</div>
         <a href="${baseUrl}/super-admin/notifications" class="nav-item">

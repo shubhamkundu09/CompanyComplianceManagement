@@ -324,6 +324,17 @@ public class AssignmentService {
         }
         companyComplianceRepository.save(companyCompliance);
 
+        // Record history for CompanyCompliance
+        ComplianceHistory ccHistory = new ComplianceHistory();
+        ccHistory.setCompanyCompliance(companyCompliance);
+        ccHistory.setPreviousStatus(ComplianceStatus.PENDING);
+        ccHistory.setNewStatus(ComplianceStatus.COMPLETED);
+        ccHistory.setAction("Marked as Completed by Company Admin");
+        ccHistory.setRemarks("Completed by Company Admin: " + adminId + (submissionReference != null ? ". Reference: " + submissionReference : ""));
+        ccHistory.setPerformedBy(userRepository.findById(adminId).orElse(null));
+        ccHistory.setPerformedAt(now);
+        historyRepository.save(ccHistory);
+
         // Update ALL active EmployeeAssignment records for this config
         if (config != null) {
             List<EmployeeAssignment> assignments = assignmentRepository.findByConfigIdAndIsActiveTrue(config.getId());

@@ -1848,6 +1848,140 @@
     </div><!-- /partner 04 -->
 
 
+  <!-- DIVIDER -->
+  <div class="sec-divider">
+    <div class="sec-divider-inner on-dark">
+      <div class="sdiv-diamond"></div>
+      <span class="sdiv-label">05</span>
+      <div class="sdiv-diamond"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════
+  PARTNER 05 — DOCUMENTATION & PROPERTY SPECIALISTS (DARK)
+══════════════════════ -->
+  <div class="partner-dark" id="s5">
+
+    <div class="pb-banner reveal">
+      <div class="sec-num">05</div>
+      <div class="pb-photo">
+        <!-- Replace with your actual image path for Hari Chand Verma -->
+        <img src="${baseUrl}/vnextimages/companyfiles/team/hari_chand_verma.jpeg" alt="Hari Chand Verma">
+      </div>
+      <div class="pb-info">
+        <div class="pb-eyebrow">Documentation Experts · VNext Legal LLP</div>
+        <h2 class="pb-name dark">Hari Chand Verma</h2>
+        <div class="pb-rule"></div>
+        <p class="pb-tagline dark">Documents Writer &amp; Land / Real Estate Specialist with over 40+ years of trusted experience in accurate documentation and hassle-free service.</p>
+        <div class="pb-badges">
+          <div class="badge">
+            <svg viewBox="0 0 24 24">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+            <span>Documents Writer</span>
+          </div>
+          <div class="badge">
+            <svg viewBox="0 0 24 24">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              <polyline points="9 22 9 12 15 12 15 22" />
+            </svg>
+            <span>Land &amp; Real Estate Specialist</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assistants / Team Members Strip -->
+    <div class="assoc-strip dark reveal">
+      <div class="assoc-strip-label dark">Assistance &amp; Support</div>
+      <div class="assoc-grid">
+        <div class="assoc-card">
+          <!-- Replace with your actual image path for Jeet Verma -->
+          <img src="${baseUrl}/vnextimages/companyfiles/team/jeet_verma.jpeg" alt="Jeet Verma">
+          <div class="assoc-name dark">Jeet Verma</div>
+          <div class="assoc-role dark">Legal Documentation Support</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pb-body reveal">
+
+      <!-- Profile / Specialty -->
+      <div class="flex-grid">
+        <div class="icard span-full">
+          <div class="icard-head dark">
+            <svg viewBox="0 0 24 24">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            <div class="icard-title dark">Profile &amp; Expertise</div>
+          </div>
+          <div class="icard-body">
+            <p class="ic-p dark">Specialized in Land &amp; Real Estate Transactions with a proven track record of 40+ years in drafting and execution of all types of property documents. Our property matters are handled with experience and trust, ensuring hassle-free service.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Two Column Services List -->
+      <div class="flex-grid">
+        <div class="icard">
+          <div class="icard-head dark">
+            <svg viewBox="0 0 24 24">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M3 9h18M9 21V9" />
+            </svg>
+            <div class="icard-title dark">Property &amp; Land Services</div>
+          </div>
+          <div class="icard-body">
+            <ul class="ic-list dark">
+              <li>Sale Deed (Property Transfer)</li>
+              <li>Transfer Deed</li>
+              <li>Agreement to Sell / Sale Agreement</li>
+              <li>Gift Deed</li>
+              <li>Lease Deed (Rent / Lease Agreements)</li>
+              <li>Partition Deed</li>
+              <li>Power of Attorney</li>
+              <li>Will / Testament</li>
+              <li>Mortgage Deed (Loan / Finance)</li>
+              <li>Release Deed</li>
+              <li>Conveyance Deed</li>
+              <li>Registry &amp; Mutation Related Documents</li>
+            </ul>
+          </div>
+        </div>
+        
+        <div class="icard">
+          <div class="icard-head dark">
+            <svg viewBox="0 0 24 24">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+            <div class="icard-title dark">All Kinds of Legal Documentation</div>
+          </div>
+          <div class="icard-body">
+            <ul class="ic-list dark">
+              <li>Drafting of All Kinds of Legal Documentation</li>
+              <li>Sale Deed</li>
+              <li>Transfer Deed</li>
+              <li>Agreements</li>
+              <li>Power of Attorney</li>
+              <li>Marriage Registration</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div><!-- /partner 05 -->
+
 
    <%@ include file="footer.jsp" %>
 

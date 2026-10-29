@@ -216,6 +216,7 @@ public class CompanyAdminController {
     @GetMapping("/compliance/assigned")
     public ApiResponse<List<ComplianceConfigDTO>> getAssignedCompliances(@CurrentUser User admin) {
         Long companyId = getCompanyId(admin);
+        complianceService.renewCompletedRecurringCompliancesForCompany(companyId);
         Company company = companyService.getCompanyEntityById(companyId);
         String companyName = company.getName();
 
@@ -494,6 +495,7 @@ public class CompanyAdminController {
     @GetMapping("/compliance/parents")
     public ApiResponse<List<ParentComplianceDetailsDTO>> getCompanyParentCompliances(@CurrentUser User admin) {
         Long companyId = getCompanyId(admin);
+        complianceService.renewCompletedRecurringCompliancesForCompany(companyId);
         List<CompanyCompliance> allCCs = companyComplianceRepository
                 .findByCompanyIdAndIsActiveTrueAndDeletedFalse(companyId);
 
@@ -1068,7 +1070,8 @@ public class CompanyAdminController {
         dto.setId(config.getId());
         dto.setFrequency(config.getFrequency());
         if (config.getFrequency() != null) {
-            LocalDate effectiveDueDate = complianceService.calculateEffectiveDueDate(config);
+            LocalDate effectiveDueDate = config.getDueDate() != null ? config.getDueDate()
+                    : (config.getCustomDueDate() != null ? config.getCustomDueDate() : complianceService.calculateEffectiveDueDate(config));
             dto.setEffectiveDueDate(effectiveDueDate);
             dto.setDueDate(effectiveDueDate);
             dto.setReminderDaysBefore(config.getReminderDaysBefore());
@@ -1113,7 +1116,8 @@ public class CompanyAdminController {
             dto.setReminderDaysBefore(config.getReminderDaysBefore());
             dto.setRepeatReminder(config.getRepeatReminder());
             dto.setReminderIntervalDays(config.getReminderIntervalDays());
-            LocalDate effectiveDueDate = complianceService.calculateEffectiveDueDate(config);
+            LocalDate effectiveDueDate = config.getDueDate() != null ? config.getDueDate()
+                    : (config.getCustomDueDate() != null ? config.getCustomDueDate() : complianceService.calculateEffectiveDueDate(config));
             dto.setEffectiveDueDate(effectiveDueDate);
             if (effectiveDueDate != null) {
                 dto.setDueDate(effectiveDueDate);
@@ -1157,5 +1161,46 @@ public class CompanyAdminController {
         }
 
         return dto;
+    }
+
+    // ==================== COMPLIANCE HISTORY & OVERDUE ====================
+
+    @GetMapping("/compliance/history/summary")
+    public ApiResponse<CompanyHistorySummaryDTO> getComplianceHistorySummary(
+            @CurrentUser User admin,
+            @RequestParam(defaultValue = "0") int year) {
+        Long companyId = getCompanyId(admin);
+        int targetYear = (year > 0) ? year : LocalDate.now(IST_ZONE).getYear();
+        CompanyHistorySummaryDTO summary = complianceService.getComplianceHistorySummary(companyId, targetYear);
+        return ApiResponse.success(summary, "Company compliance history summary retrieved successfully");
+    }
+
+    @GetMapping("/compliance/history")
+    public ApiResponse<Page<CompanyComplianceHistoryDTO>> getComplianceHistory(
+            @CurrentUser User admin,
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer month,
+            @RequestParam(required = false) ComplianceStatus status,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "15") int size) {
+        Long companyId = getCompanyId(admin);
+        Pageable pageable = PageRequest.of(page, size);
+        Page<CompanyComplianceHistoryDTO> result = complianceService.getComplianceHistoryRecords(
+                companyId, year, month, status, search, pageable);
+        return ApiResponse.success(result, "Company compliance history records retrieved successfully");
+    }
+
+    @GetMapping("/compliance/history/{complianceId}/logs")
+    public ApiResponse<List<ComplianceHistoryDTO>> getComplianceItemLogs(
+            @CurrentUser User admin,
+            @PathVariable Long complianceId) {
+        Long companyId = getCompanyId(admin);
+        boolean exists = companyComplianceRepository.existsByIdAndCompanyIdAndDeletedFalse(complianceId, companyId);
+        if (!exists) {
+            throw new ResourceNotFoundException("Compliance not found for this company");
+        }
+        List<ComplianceHistoryDTO> logs = complianceService.getComplianceItemLogs(complianceId);
+        return ApiResponse.success(logs, "Compliance history logs retrieved successfully");
     }
 }

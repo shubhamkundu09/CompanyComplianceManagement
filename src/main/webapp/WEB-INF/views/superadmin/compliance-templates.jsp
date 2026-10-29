@@ -1418,6 +1418,9 @@
         <a href="${baseUrl}/super-admin/compliance/templates" class="nav-item active">
             <i class="fas fa-tags"></i> Categories
         </a>
+        <a href="${baseUrl}/super-admin/history" class="nav-item">
+            <i class="fas fa-history"></i> Compliance History
+        </a>
 
         <div class="sidebar-label">Push Settings</div>
         <a href="${baseUrl}/super-admin/notifications" class="nav-item">
@@ -1425,6 +1428,9 @@
         </a>
 
         <div class="sidebar-label">Account</div>
+        <a href="${baseUrl}/super-admin/profile" class="nav-item">
+            <i class="fas fa-user-shield"></i> My Profile
+        </a>
         <a href="${baseUrl}/change-password" class="nav-item">
             <i class="fas fa-key"></i> Change Password
         </a>

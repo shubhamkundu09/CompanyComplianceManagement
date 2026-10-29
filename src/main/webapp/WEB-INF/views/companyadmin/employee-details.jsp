@@ -1137,13 +1137,22 @@
 
             <div class="sidebar-label">Compliance</div>
              <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
-                                         <i class="fas fa-tasks"></i> My Compliances
-                        </a>
+                 <i class="fas fa-tasks"></i> My Compliances
+             </a>
+             <a href="${baseUrl}/company-admin/compliance/calendar" class="nav-item">
+                 <i class="fas fa-calendar-alt"></i> Calendar View
+             </a>
+             <a href="${baseUrl}/company-admin/history" class="nav-item">
+                 <i class="fas fa-history"></i> Compliance History
+             </a>
 
-<div class="sidebar-label">Account</div>
-            <a href="${baseUrl}/company-admin/change-password" class="nav-item">
-                <i class="fas fa-key"></i> Change Password
-            </a>
+             <div class="sidebar-label">Account</div>
+             <a href="${baseUrl}/company-admin/company-details" class="nav-item">
+                 <i class="fas fa-building"></i> Company Profile
+             </a>
+             <a href="${baseUrl}/company-admin/change-password" class="nav-item">
+                 <i class="fas fa-key"></i> Change Password
+             </a>
 
             <div style="margin-top: auto; padding-top: 16px; border-top: 1px solid rgba(226, 232, 240, 0.6);">
                 <a href="#" onclick="handleLogout()" class="nav-item" style="color: var(--gray-400);">

@@ -18,6 +18,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.transaction.annotation.Transactional;
@@ -1096,5 +1098,37 @@ public class SuperAdminController {
         dto.setLastSentAt(entity.getLastSentAt() != null ? entity.getLastSentAt().toString() : null);
         dto.setSentTodayCount(sentCount);
         return dto;
+    }
+
+    // ==================== COMPLIANCE HISTORY & OVERDUE ====================
+
+    @GetMapping("/compliance/history/summary")
+    public ApiResponse<CompanyHistorySummaryDTO> getComplianceHistorySummary(
+            @RequestParam(required = false) Long companyId,
+            @RequestParam(defaultValue = "0") int year) {
+        int targetYear = (year > 0) ? year : LocalDate.now(ZoneId.of("Asia/Kolkata")).getYear();
+        CompanyHistorySummaryDTO summary = complianceService.getComplianceHistorySummary(companyId, targetYear);
+        return ApiResponse.success(summary, "Compliance history summary retrieved successfully");
+    }
+
+    @GetMapping("/compliance/history")
+    public ApiResponse<Page<CompanyComplianceHistoryDTO>> getComplianceHistory(
+            @RequestParam(required = false) Long companyId,
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer month,
+            @RequestParam(required = false) ComplianceStatus status,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "15") int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<CompanyComplianceHistoryDTO> result = complianceService.getComplianceHistoryRecords(
+                companyId, year, month, status, search, pageable);
+        return ApiResponse.success(result, "Compliance history records retrieved successfully");
+    }
+
+    @GetMapping("/compliance/history/{complianceId}/logs")
+    public ApiResponse<List<ComplianceHistoryDTO>> getComplianceItemLogs(@PathVariable Long complianceId) {
+        List<ComplianceHistoryDTO> logs = complianceService.getComplianceItemLogs(complianceId);
+        return ApiResponse.success(logs, "Compliance history logs retrieved successfully");
     }
 }

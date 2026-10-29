@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -747,9 +748,13 @@ public class ComplianceService {
 
     // ==================== GET PARENT COMPLIANCE DETAILS ====================
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ParentComplianceDetailsDTO getParentComplianceDetails(Long parentId, Long companyId) {
         log.info("Getting parent compliance details for ID: {} and company: {}", parentId, companyId);
+
+        if (companyId != null) {
+            renewCompletedRecurringCompliancesForCompany(companyId);
+        }
 
         CompanyCompliance parentCC = null;
 
@@ -858,9 +863,8 @@ public class ComplianceService {
                     if (config.getFrequency() != null) {
                         subDto.setFrequency(config.getFrequency().name());
                     }
-                    LocalDate effectiveDueDate = (config.getFrequency() == ComplianceFrequency.ONE_TIME)
-                            ? (config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate())
-                            : calculateEffectiveDueDate(config);
+                    LocalDate effectiveDueDate = config.getDueDate() != null ? config.getDueDate()
+                            : (config.getCustomDueDate() != null ? config.getCustomDueDate() : calculateEffectiveDueDate(config));
                     if (effectiveDueDate != null) {
                         subDto.setDueDate(effectiveDueDate.atStartOfDay());
                         if (subDto.getStatus() != ComplianceStatus.COMPLETED && subCC.getCompletedAt() == null) {
@@ -2387,6 +2391,37 @@ if (parentCC == null) {
     @Transactional
     public void syncOverdueComplianceStatuses() {
         LocalDate today = LocalDate.now(IST_ZONE);
+
+        // Self-heal: ensure compliances with completedAt are marked COMPLETED in database
+        List<CompanyCompliance> completedWithWrongStatus = companyComplianceRepository.findAll().stream()
+                .filter(cc -> Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted())
+                .filter(cc -> cc.getStatus() != ComplianceStatus.COMPLETED && cc.getCompletedAt() != null)
+                .collect(Collectors.toList());
+        for (CompanyCompliance completedCC : completedWithWrongStatus) {
+            completedCC.setStatus(ComplianceStatus.COMPLETED);
+            companyComplianceRepository.save(completedCC);
+        }
+
+        // Auto-renew completed recurring compliances whose past due date has passed
+        try {
+            renewCompletedRecurringCompliances();
+        } catch (Exception e) {
+            log.warn("Error renewing completed recurring compliances in sync: {}", e.getMessage());
+        }
+
+        // Self-heal: ensure compliances with due dates in future/today are not lingering as OVERDUE
+        List<CompanyCompliance> futureOverdue = companyComplianceRepository.findAll().stream()
+                .filter(cc -> Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted())
+                .filter(cc -> cc.getStatus() == ComplianceStatus.OVERDUE && cc.getCompletedAt() == null)
+                .collect(Collectors.toList());
+        for (CompanyCompliance cc : futureOverdue) {
+            LocalDate due = resolveEffectiveDueDate(cc);
+            if (due != null && !due.isBefore(today)) {
+                cc.setStatus(ComplianceStatus.IN_PROGRESS);
+                companyComplianceRepository.save(cc);
+            }
+        }
+
         List<CompanyCompliance> allCCs = companyComplianceRepository.findAll().stream()
                 .filter(cc -> Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted())
                 .filter(cc -> cc.getStatus() != ComplianceStatus.COMPLETED && cc.getCompletedAt() == null)
@@ -2418,24 +2453,32 @@ if (parentCC == null) {
                 continue;
             }
 
-            LocalDate due;
-            if (config.getFrequency() == ComplianceFrequency.ONE_TIME) {
-                due = config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate();
-            } else if (config.getFrequency() != null) {
-                due = calculateEffectiveDueDate(config);
-            } else {
-                due = config.getDueDate() != null ? config.getDueDate() : config.getCustomDueDate();
-            }
+            LocalDate due = config.getDueDate() != null ? config.getDueDate()
+                    : (config.getCustomDueDate() != null ? config.getCustomDueDate() : calculateEffectiveDueDate(config));
 
             if (due != null) {
                 if (due.isBefore(today)) {
                     if (cc.getStatus() != ComplianceStatus.OVERDUE) {
+                        ComplianceStatus oldStatus = cc.getStatus();
                         cc.setStatus(ComplianceStatus.OVERDUE);
                         companyComplianceRepository.save(cc);
+                        try {
+                            addHistoryForCompanyCompliance(cc, oldStatus, ComplianceStatus.OVERDUE,
+                                    "MARKED_OVERDUE", "Compliance became OVERDUE (due date was " + due + ")", null);
+                        } catch (Exception ex) {
+                            log.debug("History recording for overdue skipped: {}", ex.getMessage());
+                        }
                     }
                 } else if (cc.getStatus() == ComplianceStatus.OVERDUE) {
+                    ComplianceStatus oldStatus = cc.getStatus();
                     cc.setStatus(ComplianceStatus.IN_PROGRESS);
                     companyComplianceRepository.save(cc);
+                    try {
+                        addHistoryForCompanyCompliance(cc, oldStatus, ComplianceStatus.IN_PROGRESS,
+                                "STATUS_UPDATED", "Status updated back to IN_PROGRESS", null);
+                    } catch (Exception ex) {
+                        log.debug("History recording skipped: {}", ex.getMessage());
+                    }
                 }
             }
         }
@@ -3432,15 +3475,179 @@ if (parentCC == null) {
 
         switch (config.getFrequency()) {
             case MONTHLY:
-                return currentDueDate.plusMonths(1);
+                return advanceDueDate(currentDueDate, ComplianceFrequency.MONTHLY, config.getDueDayOfMonth());
             case QUARTERLY:
-                return currentDueDate.plusMonths(3);
+                return advanceDueDate(currentDueDate, ComplianceFrequency.QUARTERLY, config.getDueDayOfMonth());
             case HALF_YEARLY:
-                return currentDueDate.plusMonths(6);
+                return advanceDueDate(currentDueDate, ComplianceFrequency.HALF_YEARLY, config.getDueDayOfMonth());
             case YEARLY:
-                return currentDueDate.plusYears(1);
+                return advanceDueDate(currentDueDate, ComplianceFrequency.YEARLY, config.getDueDayOfMonth());
             default:
                 return null;
+        }
+    }
+
+    public LocalDate advanceDueDate(LocalDate currentDue, ComplianceFrequency frequency, Integer dueDayOfMonth) {
+        if (currentDue == null || frequency == null) return currentDue;
+        int targetDay = dueDayOfMonth != null ? dueDayOfMonth : currentDue.getDayOfMonth();
+        switch (frequency) {
+            case MONTHLY: {
+                LocalDate nextMonth = currentDue.plusMonths(1);
+                int maxDays = nextMonth.lengthOfMonth();
+                return LocalDate.of(nextMonth.getYear(), nextMonth.getMonth(), Math.min(targetDay, maxDays));
+            }
+            case QUARTERLY: {
+                LocalDate nextQuarter = currentDue.plusMonths(3);
+                int maxDays = nextQuarter.lengthOfMonth();
+                return LocalDate.of(nextQuarter.getYear(), nextQuarter.getMonth(), Math.min(targetDay, maxDays));
+            }
+            case HALF_YEARLY: {
+                LocalDate nextHalf = currentDue.plusMonths(6);
+                int maxDays = nextHalf.lengthOfMonth();
+                return LocalDate.of(nextHalf.getYear(), nextHalf.getMonth(), Math.min(targetDay, maxDays));
+            }
+            case YEARLY: {
+                LocalDate nextYear = currentDue.plusYears(1);
+                int maxDays = nextYear.lengthOfMonth();
+                return LocalDate.of(nextYear.getYear(), nextYear.getMonth(), Math.min(targetDay, maxDays));
+            }
+            default:
+                return currentDue;
+        }
+    }
+
+    @Transactional
+    public void renewCompletedRecurringCompliances() {
+        renewCompletedRecurringCompliancesForCompany(null);
+    }
+
+    @Transactional
+    public void renewCompletedRecurringCompliancesForCompany(Long targetCompanyId) {
+        LocalDate today = LocalDate.now(IST_ZONE);
+
+        List<CompanyCompliance> completedRecurring = (targetCompanyId != null
+                ? companyComplianceRepository.findByCompanyIdAndIsActiveTrueAndDeletedFalse(targetCompanyId)
+                : companyComplianceRepository.findAll()).stream()
+                .filter(cc -> cc.getStatus() == ComplianceStatus.COMPLETED || cc.getCompletedAt() != null)
+                .filter(cc -> Boolean.TRUE.equals(cc.getIsActive()) && !cc.isDeleted())
+                .filter(cc -> !isParentWithSubCompliances(cc))
+                .collect(Collectors.toList());
+
+        if (completedRecurring.isEmpty()) {
+            return;
+        }
+
+        for (CompanyCompliance cc : completedRecurring) {
+            ComplianceConfig config = cc.getConfig();
+            if (config == null) {
+                config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
+            }
+            if (config == null && cc.getSubTemplate() != null) {
+                // Check template-level fallback config
+                ComplianceConfig templateCfg = configRepository
+                        .findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId())
+                        .orElse(null);
+                if (templateCfg != null && templateCfg.getFrequency() != null && templateCfg.getFrequency() != ComplianceFrequency.ONE_TIME) {
+                    config = new ComplianceConfig();
+                    config.setCompanyCompliance(cc);
+                    config.setFrequency(templateCfg.getFrequency());
+                    config.setDueDate(templateCfg.getDueDate());
+                    config.setCustomDueDate(templateCfg.getCustomDueDate());
+                    config.setDueDayOfMonth(templateCfg.getDueDayOfMonth());
+                    config.setInstructions(templateCfg.getInstructions());
+                    config.setDocumentRequired(templateCfg.getDocumentRequired());
+                    config = configRepository.save(config);
+                    cc.setConfig(config);
+                }
+            }
+            if (config == null || config.getFrequency() == null
+                    || config.getFrequency() == ComplianceFrequency.ONE_TIME) {
+                continue;
+            }
+
+            LocalDate lastDueDate = config.getDueDate() != null ? config.getDueDate() : config.getCustomDueDate();
+            if (lastDueDate == null) {
+                lastDueDate = calculateEffectiveDueDate(config);
+            }
+            if (lastDueDate == null) continue;
+
+            boolean shouldRenew = false;
+            LocalDate nextDueDate = lastDueDate;
+
+            if (config.getFrequency() == ComplianceFrequency.MONTHLY) {
+                if (YearMonth.from(lastDueDate).isBefore(YearMonth.from(today))) {
+                    shouldRenew = true;
+                    while (YearMonth.from(nextDueDate).isBefore(YearMonth.from(today))) {
+                        nextDueDate = advanceDueDate(nextDueDate, ComplianceFrequency.MONTHLY, config.getDueDayOfMonth());
+                    }
+                }
+            } else if (config.getFrequency() == ComplianceFrequency.QUARTERLY) {
+                if (nextDueDate.plusMonths(3).isBefore(today) || YearMonth.from(nextDueDate.plusMonths(1)).isBefore(YearMonth.from(today))) {
+                    LocalDate advanced = advanceDueDate(nextDueDate, ComplianceFrequency.QUARTERLY, config.getDueDayOfMonth());
+                    if (advanced.isAfter(nextDueDate)) {
+                        shouldRenew = true;
+                        nextDueDate = advanced;
+                    }
+                }
+            } else if (config.getFrequency() == ComplianceFrequency.HALF_YEARLY) {
+                if (nextDueDate.plusMonths(6).isBefore(today)) {
+                    LocalDate advanced = advanceDueDate(nextDueDate, ComplianceFrequency.HALF_YEARLY, config.getDueDayOfMonth());
+                    if (advanced.isAfter(nextDueDate)) {
+                        shouldRenew = true;
+                        nextDueDate = advanced;
+                    }
+                }
+            } else if (config.getFrequency() == ComplianceFrequency.YEARLY) {
+                if (nextDueDate.getYear() < today.getYear()) {
+                    LocalDate advanced = advanceDueDate(nextDueDate, ComplianceFrequency.YEARLY, config.getDueDayOfMonth());
+                    if (advanced.isAfter(nextDueDate)) {
+                        shouldRenew = true;
+                        nextDueDate = advanced;
+                    }
+                }
+            }
+
+            if (!shouldRenew || !nextDueDate.isAfter(lastDueDate)) {
+                continue;
+            }
+
+            log.info("Renewing recurring compliance ID: {} for company: {} from {} to next due date: {}",
+                    cc.getId(), cc.getCompany() != null ? cc.getCompany().getName() : "N/A", lastDueDate, nextDueDate);
+
+            try {
+                addHistoryForCompanyCompliance(cc, ComplianceStatus.COMPLETED, ComplianceStatus.PENDING,
+                        "RECURRING_RENEWED", "Cycle completed for due date " + lastDueDate + ". Rolled forward to next due date " + nextDueDate, null);
+            } catch (Exception e) {
+                log.debug("History recording for renewal skipped: {}", e.getMessage());
+            }
+
+            config.setDueDate(nextDueDate);
+            config.setCustomDueDate(nextDueDate);
+            config.setUpdatedAt(LocalDateTime.now(IST_ZONE));
+            configRepository.save(config);
+
+            cc.setStatus(ComplianceStatus.PENDING);
+            cc.setCompletedAt(null);
+            cc.setCompletedBy(null);
+            cc.setAdminSubmissionReference(null);
+            cc.setAdminSubmissionDocumentUrl(null);
+            companyComplianceRepository.save(cc);
+
+            List<EmployeeAssignment> oldAssignments = assignmentRepository
+                    .findByConfigIdAndIsActiveTrue(config.getId());
+            if (!oldAssignments.isEmpty()) {
+                for (EmployeeAssignment old : oldAssignments) {
+                    old.setDueDate(nextDueDate);
+                    old.setCompletedAt(null);
+                    old.setSubmissionReference(null);
+                    old.setSubmissionDocumentUrl(null);
+                    old.setCompletedBy(null);
+                    old.setIsOverdue(false);
+                    old.setOverdueNotifiedAt(null);
+                    old.setLastReminderSent(null);
+                    assignmentRepository.save(old);
+                }
+            }
         }
     }
 
@@ -3637,9 +3844,8 @@ if (parentCC == null) {
             dto.setRepeatReminder(config.getRepeatReminder());
             dto.setReminderIntervalDays(config.getReminderIntervalDays());
 
-            LocalDate effectiveDueDate = (config.getFrequency() == ComplianceFrequency.ONE_TIME)
-                    ? (config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate())
-                    : calculateEffectiveDueDate(config);
+            LocalDate effectiveDueDate = config.getDueDate() != null ? config.getDueDate()
+                    : (config.getCustomDueDate() != null ? config.getCustomDueDate() : calculateEffectiveDueDate(config));
             dto.setEffectiveDueDate(effectiveDueDate);
             if (effectiveDueDate != null) {
                 dto.setDueDate(effectiveDueDate);
@@ -3756,9 +3962,8 @@ if (parentCC == null) {
 
         if (config != null && config.getFrequency() != null) {
             dto.setFrequency(config.getFrequency().name());
-            LocalDate effectiveDueDate = (config.getFrequency() == ComplianceFrequency.ONE_TIME)
-                    ? (config.getCustomDueDate() != null ? config.getCustomDueDate() : config.getDueDate())
-                    : calculateEffectiveDueDate(config);
+            LocalDate effectiveDueDate = config.getDueDate() != null ? config.getDueDate()
+                    : (config.getCustomDueDate() != null ? config.getCustomDueDate() : calculateEffectiveDueDate(config));
             dto.setEffectiveDueDate(effectiveDueDate);
             dto.setDueDate(effectiveDueDate);
 
@@ -3967,11 +4172,493 @@ if (parentCC == null) {
         return cc.getId();
     }
 
-    // ==================== DEPRECATED/REMOVED CUSTOM COMPLIANCE METHODS ====================
-    // The following methods have been removed as company admin can no longer create custom parent compliances:
-    // - createCustomTemplate
-    // - getCustomTemplatesByCompany
-    // - createCustomSubTemplate (old)
-    // - configureCustomCompliance
-    // The new method configureSubComplianceForCompany replaces the old configureCustomSubCompliance.
+    // ==================== COMPLIANCE HISTORY & OVERDUE TRACKING ====================
+
+    public LocalDate resolveEffectiveDueDate(CompanyCompliance cc) {
+        if (cc == null) return null;
+        ComplianceConfig config = cc.getConfig();
+        if (config == null && cc.getId() != null) {
+            config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
+        }
+        if (config == null && cc.getSubTemplate() != null) {
+            config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+        }
+        if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
+            config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+        }
+        if (config == null) return null;
+        LocalDate due = config.getDueDate();
+        if (due == null) due = config.getCustomDueDate();
+        if (due == null) due = calculateEffectiveDueDate(config);
+        return due;
+    }
+
+    public static class ResolvedComplianceStatus {
+        public boolean isCompleted;
+        public boolean isOverdue;
+        public boolean completedLate;
+        public int daysOverdue;
+        public ComplianceStatus effectiveStatus;
+        public LocalDateTime completedAt;
+        public Long completedBy;
+        public String submissionReference;
+        public String submissionDocumentUrl;
+    }
+
+    public ResolvedComplianceStatus resolveComplianceStatus(CompanyCompliance cc, LocalDate today) {
+        ResolvedComplianceStatus res = new ResolvedComplianceStatus();
+        LocalDate due = resolveEffectiveDueDate(cc);
+
+        LocalDateTime compAt = cc.getCompletedAt();
+        Long compBy = cc.getCompletedBy();
+        String subRef = cc.getAdminSubmissionReference();
+        String docUrl = cc.getAdminSubmissionDocumentUrl();
+
+        boolean isCompleted = (cc.getStatus() == ComplianceStatus.COMPLETED || compAt != null);
+
+        // Fallback: check config / employee assignments if not directly on cc
+        if (!isCompleted) {
+            ComplianceConfig config = cc.getConfig();
+            if (config == null && cc.getId() != null) {
+                config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
+            }
+            if (config != null && config.getId() != null) {
+                Optional<EmployeeAssignment> doneOpt = assignmentRepository.findCompletedAssignmentByConfigId(config.getId());
+                if (doneOpt.isPresent()) {
+                    isCompleted = true;
+                    EmployeeAssignment done = doneOpt.get();
+                    compAt = done.getCompletedAt();
+                    compBy = done.getCompletedBy() != null ? done.getCompletedBy() : done.getEmployeeId();
+                    if (done.getSubmissionReference() != null) subRef = done.getSubmissionReference();
+                    if (done.getSubmissionDocumentUrl() != null) docUrl = done.getSubmissionDocumentUrl();
+                }
+            }
+        }
+
+        res.isCompleted = isCompleted;
+        res.completedAt = compAt;
+        res.completedBy = compBy;
+        res.submissionReference = subRef;
+        res.submissionDocumentUrl = docUrl;
+
+        if (isCompleted) {
+            res.effectiveStatus = ComplianceStatus.COMPLETED;
+            res.isOverdue = false;
+            if (due != null && compAt != null && compAt.toLocalDate().isAfter(due)) {
+                res.completedLate = true;
+                res.daysOverdue = (int) ChronoUnit.DAYS.between(due, compAt.toLocalDate());
+            } else {
+                res.completedLate = false;
+                res.daysOverdue = 0;
+            }
+        } else {
+            // An uncompleted compliance is ONLY overdue if its due date has strictly passed today!
+            // If due date is today or in the future, it CANNOT be overdue.
+            boolean overdue = due != null && due.isBefore(today) && cc.getStatus() != ComplianceStatus.EXEMPTED;
+            res.isOverdue = overdue;
+            res.completedLate = false;
+            if (overdue) {
+                res.effectiveStatus = ComplianceStatus.OVERDUE;
+                res.daysOverdue = Math.max(1, (int) ChronoUnit.DAYS.between(due, today));
+            } else if (cc.getStatus() == ComplianceStatus.IN_PROGRESS || cc.getStatus() == ComplianceStatus.OVERDUE) {
+                // If it was wrongly marked OVERDUE in DB but due is in the future or today, it is active IN_PROGRESS
+                res.effectiveStatus = ComplianceStatus.IN_PROGRESS;
+                res.daysOverdue = 0;
+            } else {
+                res.effectiveStatus = (cc.getStatus() != null) ? cc.getStatus() : ComplianceStatus.PENDING;
+                res.daysOverdue = 0;
+            }
+        }
+
+        return res;
+    }
+
+    @Transactional
+    public CompanyHistorySummaryDTO getComplianceHistorySummary(Long companyId, int targetYear) {
+        List<CompanyCompliance> all;
+        String companyName = "All Companies";
+        if (companyId != null && companyId > 0) {
+            renewCompletedRecurringCompliancesForCompany(companyId);
+            all = companyComplianceRepository.findByCompanyIdWithDetails(companyId);
+            companyName = companyRepository.findById(companyId).map(Company::getName).orElse("Company #" + companyId);
+        } else {
+            renewCompletedRecurringCompliances();
+            all = companyComplianceRepository.findAllActiveCompliancesWithDetails();
+        }
+
+        LocalDate today = LocalDate.now(IST_ZONE);
+
+        String[] monthNames = {
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+        };
+        List<MonthlyOverdueSummaryDTO> monthlyList = new ArrayList<>();
+        for (int m = 1; m <= 12; m++) {
+            monthlyList.add(MonthlyOverdueSummaryDTO.builder()
+                    .month(m)
+                    .monthName(monthNames[m - 1])
+                    .year(targetYear)
+                    .overdueCount(0)
+                    .completedCount(0)
+                    .completedLateCount(0)
+                    .pendingCount(0)
+                    .inProgressCount(0)
+                    .totalCount(0)
+                    .build());
+        }
+
+        List<CompanyComplianceHistoryDTO> allOccurrences = generateYearlyHistoryOccurrences(all, targetYear, today, monthNames);
+
+        long totalOverdue = 0;
+        long totalCompleted = 0;
+        long totalCompletedLate = 0;
+        long totalPending = 0;
+        long totalCompliances = allOccurrences.size();
+
+        for (CompanyComplianceHistoryDTO occ : allOccurrences) {
+            int monthIdx = occ.getDueMonth() - 1;
+            if (monthIdx < 0 || monthIdx >= 12) continue;
+
+            MonthlyOverdueSummaryDTO mDto = monthlyList.get(monthIdx);
+            mDto.setTotalCount(mDto.getTotalCount() + 1);
+
+            if (occ.getStatus() == ComplianceStatus.COMPLETED) {
+                mDto.setCompletedCount(mDto.getCompletedCount() + 1);
+                totalCompleted++;
+                if (occ.isCompletedLate()) {
+                    mDto.setCompletedLateCount(mDto.getCompletedLateCount() + 1);
+                    totalCompletedLate++;
+                }
+            } else if (occ.isOverdue() || occ.getStatus() == ComplianceStatus.OVERDUE) {
+                mDto.setOverdueCount(mDto.getOverdueCount() + 1);
+                totalOverdue++;
+            } else if (occ.getStatus() == ComplianceStatus.IN_PROGRESS) {
+                mDto.setInProgressCount(mDto.getInProgressCount() + 1);
+                totalPending++;
+            } else {
+                mDto.setPendingCount(mDto.getPendingCount() + 1);
+                totalPending++;
+            }
+        }
+
+        String mostOverdueMonth = "None";
+        long maxOverdue = 0;
+        for (MonthlyOverdueSummaryDTO m : monthlyList) {
+            if (m.getOverdueCount() > maxOverdue) {
+                maxOverdue = m.getOverdueCount();
+                mostOverdueMonth = m.getMonthName() + " (" + m.getOverdueCount() + " overdue)";
+            }
+        }
+
+        return CompanyHistorySummaryDTO.builder()
+                .companyId(companyId)
+                .companyName(companyName)
+                .year(targetYear)
+                .totalCompliances(totalCompliances)
+                .totalOverdue(totalOverdue)
+                .totalCompleted(totalCompleted)
+                .totalCompletedLate(totalCompletedLate)
+                .totalPending(totalPending)
+                .mostOverdueMonth(mostOverdueMonth)
+                .monthlyBreakdown(monthlyList)
+                .build();
+    }
+
+    @Transactional
+    public Page<CompanyComplianceHistoryDTO> getComplianceHistoryRecords(
+            Long companyId, Integer targetYear, Integer targetMonth,
+            ComplianceStatus statusFilter, String search, Pageable pageable) {
+
+        List<CompanyCompliance> all;
+        if (companyId != null && companyId > 0) {
+            renewCompletedRecurringCompliancesForCompany(companyId);
+            all = companyComplianceRepository.findByCompanyIdWithDetails(companyId);
+        } else {
+            renewCompletedRecurringCompliances();
+            all = companyComplianceRepository.findAllActiveCompliancesWithDetails();
+        }
+
+        LocalDate today = LocalDate.now(IST_ZONE);
+        int year = (targetYear != null && targetYear > 0) ? targetYear : today.getYear();
+        String cleanSearch = (search != null) ? search.trim().toLowerCase() : null;
+
+        String[] monthNames = {
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+        };
+
+        List<CompanyComplianceHistoryDTO> allOccurrences = generateYearlyHistoryOccurrences(all, year, today, monthNames);
+        List<CompanyComplianceHistoryDTO> filteredList = new ArrayList<>();
+
+        for (CompanyComplianceHistoryDTO item : allOccurrences) {
+            if (targetMonth != null && targetMonth > 0 && !item.getDueMonth().equals(targetMonth)) {
+                continue;
+            }
+
+            if (statusFilter != null) {
+                if (statusFilter == ComplianceStatus.OVERDUE) {
+                    if (!item.isOverdue() && item.getStatus() != ComplianceStatus.OVERDUE) continue;
+                } else if (statusFilter == ComplianceStatus.COMPLETED) {
+                    if (item.getStatus() != ComplianceStatus.COMPLETED) continue;
+                } else if (item.getStatus() != statusFilter) {
+                    continue;
+                }
+            }
+
+            if (cleanSearch != null && !cleanSearch.isEmpty()) {
+                String cName = item.getCompanyName() != null ? item.getCompanyName() : "";
+                String tName = item.getComplianceName() != null ? item.getComplianceName() : "";
+                String sName = item.getSubComplianceName() != null ? item.getSubComplianceName() : "";
+                String catName = item.getCategoryName() != null ? item.getCategoryName() : "";
+
+                boolean match = cName.toLowerCase().contains(cleanSearch) ||
+                        tName.toLowerCase().contains(cleanSearch) ||
+                        sName.toLowerCase().contains(cleanSearch) ||
+                        catName.toLowerCase().contains(cleanSearch);
+                if (!match) {
+                    continue;
+                }
+            }
+
+            filteredList.add(item);
+        }
+
+        filteredList.sort((a, b) -> {
+            if (a.getDueDate() != null && b.getDueDate() != null) {
+                int cmp = b.getDueDate().compareTo(a.getDueDate());
+                if (cmp != 0) return cmp;
+            } else if (a.getDueDate() != null) {
+                return -1;
+            } else if (b.getDueDate() != null) {
+                return 1;
+            }
+            return Long.compare(b.getId() != null ? b.getId() : 0, a.getId() != null ? a.getId() : 0);
+        });
+
+        int total = filteredList.size();
+        int page = pageable.getPageNumber();
+        int size = pageable.getPageSize();
+        int fromIndex = Math.min(page * size, total);
+        int toIndex = Math.min(fromIndex + size, total);
+
+        List<CompanyComplianceHistoryDTO> pageContent = filteredList.subList(fromIndex, toIndex);
+        return new PageImpl<>(pageContent, pageable, total);
+    }
+
+    public List<CompanyComplianceHistoryDTO> generateYearlyHistoryOccurrences(
+            List<CompanyCompliance> activeItems, int targetYear, LocalDate today, String[] monthNames) {
+
+        List<CompanyComplianceHistoryDTO> occurrences = new ArrayList<>();
+        int currentYear = today.getYear();
+        int currentMonth = today.getMonthValue();
+
+        for (CompanyCompliance cc : activeItems) {
+            if (isParentWithSubCompliances(cc)) {
+                continue;
+            }
+
+            LocalDate baseDue = resolveEffectiveDueDate(cc);
+            if (baseDue == null) {
+                continue;
+            }
+
+            ComplianceConfig config = cc.getConfig();
+            if (config == null && cc.getId() != null) {
+                config = configRepository.findByCompanyComplianceId(cc.getId()).orElse(null);
+            }
+            if (config == null && cc.getSubTemplate() != null) {
+                config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(cc.getSubTemplate().getId()).orElse(null);
+            }
+            if (config == null && cc.getSubTemplate() == null && cc.getTemplate() != null) {
+                config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(cc.getTemplate().getId()).orElse(null);
+            }
+
+            ComplianceFrequency freq = (config != null && config.getFrequency() != null)
+                    ? config.getFrequency() : ComplianceFrequency.ONE_TIME;
+
+            int dueDay = (config != null && config.getDueDayOfMonth() != null)
+                    ? config.getDueDayOfMonth() : baseDue.getDayOfMonth();
+
+            String compName = cc.getCompany() != null ? cc.getCompany().getName() : "";
+            String templateName = cc.getTemplate() != null ? cc.getTemplate().getName() : "";
+            String subName = cc.getSubTemplate() != null ? cc.getSubTemplate().getName() : "";
+            String category = (templateName != null && !templateName.isEmpty()) ? templateName : "General";
+
+            ResolvedComplianceStatus baseStatus = resolveComplianceStatus(cc, today);
+            String completedByName = null;
+            if (baseStatus.completedBy != null) {
+                completedByName = userRepository.findById(baseStatus.completedBy)
+                        .map(User::getFullName).orElse("User #" + baseStatus.completedBy);
+            }
+
+            // Determine effective start date for the company / compliance so we do not generate
+            // synthetic occurrences for months prior to the company's onboarding / compliance creation
+            LocalDate effectiveStartDate = null;
+            if (cc.getCompany() != null && cc.getCompany().getSubscriptionStartDate() != null) {
+                effectiveStartDate = cc.getCompany().getSubscriptionStartDate().toLocalDate();
+            } else if (cc.getCompany() != null && cc.getCompany().getCreatedAt() != null) {
+                effectiveStartDate = cc.getCompany().getCreatedAt().toLocalDate();
+            } else if (cc.getCreatedAt() != null) {
+                effectiveStartDate = cc.getCreatedAt().toLocalDate();
+            }
+
+            int startMonth = 1;
+            if (effectiveStartDate != null) {
+                if (effectiveStartDate.getYear() > targetYear) {
+                    continue; // Company did not exist in targetYear
+                } else if (effectiveStartDate.getYear() == targetYear) {
+                    startMonth = effectiveStartDate.getMonthValue();
+                }
+            }
+
+            // Determine which months in targetYear this compliance applies to
+            List<Integer> applicableMonths = new ArrayList<>();
+            if (freq == ComplianceFrequency.MONTHLY) {
+                for (int m = startMonth; m <= 12; m++) {
+                    applicableMonths.add(m);
+                }
+            } else if (freq == ComplianceFrequency.QUARTERLY) {
+                int baseMonth = baseDue.getMonthValue();
+                int m1 = ((baseMonth - 1) % 3) + 1; // 1, 2, or 3
+                int[] qMonths = {m1, m1 + 3, m1 + 6, m1 + 9};
+                for (int qm : qMonths) {
+                    if (qm >= startMonth && qm <= 12) {
+                        applicableMonths.add(qm);
+                    }
+                }
+            } else if (freq == ComplianceFrequency.HALF_YEARLY) {
+                int baseMonth = baseDue.getMonthValue();
+                int m1 = ((baseMonth - 1) % 6) + 1;
+                int[] hMonths = {m1, m1 + 6};
+                for (int hm : hMonths) {
+                    if (hm >= startMonth && hm <= 12) {
+                        applicableMonths.add(hm);
+                    }
+                }
+            } else if (freq == ComplianceFrequency.YEARLY) {
+                int baseMonth = baseDue.getMonthValue();
+                if (baseMonth >= startMonth) {
+                    applicableMonths.add(baseMonth);
+                }
+            } else {
+                // ONE_TIME: occurs in the baseDue month
+                if (baseDue.getYear() == targetYear && baseDue.getMonthValue() >= startMonth) {
+                    applicableMonths.add(baseDue.getMonthValue());
+                }
+            }
+
+            for (int m : applicableMonths) {
+                int maxDays = YearMonth.of(targetYear, m).lengthOfMonth();
+                LocalDate occurrenceDueDate = LocalDate.of(targetYear, m, Math.min(dueDay, maxDays));
+
+                ComplianceStatus occStatus;
+                boolean occIsOverdue = false;
+                boolean occCompletedLate = false;
+                int occDaysOverdue = 0;
+                LocalDateTime occCompletedAt = null;
+                String occCompletedByName = null;
+                String occSubmissionRef = null;
+                String occSubmissionDocUrl = null;
+
+                boolean isCurrentActiveRecordMonth = (baseDue.getYear() == targetYear && baseDue.getMonthValue() == m);
+
+                if (isCurrentActiveRecordMonth) {
+                    // This occurrence directly represents the current active database state
+                    occStatus = baseStatus.effectiveStatus;
+                    occIsOverdue = baseStatus.isOverdue;
+                    occCompletedLate = baseStatus.completedLate;
+                    occDaysOverdue = baseStatus.daysOverdue;
+                    occCompletedAt = baseStatus.completedAt;
+                    occCompletedByName = completedByName;
+                    occSubmissionRef = baseStatus.submissionReference;
+                    occSubmissionDocUrl = baseStatus.submissionDocumentUrl;
+                } else if (occurrenceDueDate.isBefore(today)) {
+                    // Past occurrence
+                    if (m < baseDue.getMonthValue() || (baseDue.getYear() > targetYear)) {
+                        // Occurrence prior to current active cycle was completed
+                        occStatus = ComplianceStatus.COMPLETED;
+                        occCompletedLate = false;
+                        occDaysOverdue = 0;
+                        occCompletedAt = occurrenceDueDate.atTime(18, 0);
+                        occCompletedByName = completedByName != null ? completedByName : "System";
+                        occSubmissionRef = "Completed";
+                    } else {
+                        // An occurrence whose due date passed before today and was not completed -> OVERDUE
+                        occStatus = ComplianceStatus.OVERDUE;
+                        occIsOverdue = true;
+                        occDaysOverdue = (int) ChronoUnit.DAYS.between(occurrenceDueDate, today);
+                    }
+                } else if (occurrenceDueDate.isEqual(today) || (targetYear == currentYear && m == currentMonth)) {
+                    // Current month but due date is today or future in current month
+                    occStatus = ComplianceStatus.IN_PROGRESS;
+                    occIsOverdue = false;
+                    occDaysOverdue = 0;
+                } else {
+                    // Future occurrence
+                    occStatus = ComplianceStatus.PENDING;
+                    occIsOverdue = false;
+                    occDaysOverdue = 0;
+                }
+
+                CompanyComplianceHistoryDTO dto = CompanyComplianceHistoryDTO.builder()
+                        .id(cc.getId())
+                        .companyId(cc.getCompany() != null ? cc.getCompany().getId() : null)
+                        .companyName(compName)
+                        .complianceName(templateName)
+                        .subComplianceName(subName != null && !subName.isEmpty() ? subName : null)
+                        .categoryName(category)
+                        .frequency(freq)
+                        .dueDate(occurrenceDueDate)
+                        .dueMonth(m)
+                        .dueYear(targetYear)
+                        .monthName(m >= 1 && m <= 12 ? monthNames[m - 1] : "Month " + m)
+                        .status(occStatus)
+                        .isOverdue(occIsOverdue)
+                        .completedLate(occCompletedLate)
+                        .daysOverdue(occDaysOverdue)
+                        .completedAt(occCompletedAt)
+                        .completedByName(occCompletedByName)
+                        .adminNotes(cc.getAdminNotes())
+                        .submissionReference(occSubmissionRef)
+                        .submissionDocumentUrl(occSubmissionDocUrl)
+                        .build();
+
+                occurrences.add(dto);
+            }
+        }
+
+        return occurrences;
+    }
+
+    @Transactional(readOnly = true)
+    public List<ComplianceHistoryDTO> getComplianceItemLogs(Long complianceId) {
+        List<ComplianceHistory> list = historyRepository.findByCompanyComplianceIdOrderByPerformedAtDesc(complianceId);
+        if (list.isEmpty()) {
+            CompanyCompliance cc = companyComplianceRepository.findById(complianceId).orElse(null);
+            if (cc != null && cc.getCreatedAt() != null) {
+                ComplianceHistoryDTO baseline = new ComplianceHistoryDTO();
+                baseline.setId(0L);
+                baseline.setAction("Compliance Configured / Activated");
+                baseline.setNewStatus(cc.getStatus() != null ? cc.getStatus().name() : "PENDING");
+                baseline.setPerformedAt(cc.getCreatedAt());
+                baseline.setPerformedByName("System Administrator");
+                baseline.setRemarks("Compliance initialized for " + (cc.getCompany() != null ? cc.getCompany().getName() : "company"));
+                baseline.setCompanyName(cc.getCompany() != null ? cc.getCompany().getName() : "");
+                return List.of(baseline);
+            }
+        }
+        return list.stream().map(h -> {
+            ComplianceHistoryDTO dto = new ComplianceHistoryDTO();
+            dto.setId(h.getId());
+            dto.setAction(h.getAction());
+            dto.setPreviousStatus(h.getPreviousStatus() != null ? h.getPreviousStatus().name() : null);
+            dto.setNewStatus(h.getNewStatus() != null ? h.getNewStatus().name() : null);
+            dto.setRemarks(h.getRemarks());
+            dto.setPerformedAt(h.getPerformedAt());
+            dto.setPerformedByName(h.getPerformedBy() != null ? h.getPerformedBy().getFullName() : "System / Auto");
+            dto.setCompanyName(h.getCompanyCompliance() != null && h.getCompanyCompliance().getCompany() != null
+                    ? h.getCompanyCompliance().getCompany().getName() : "");
+            return dto;
+        }).collect(Collectors.toList());
+    }
 }

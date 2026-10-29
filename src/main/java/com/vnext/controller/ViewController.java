@@ -139,6 +139,11 @@ public class ViewController {
         return "superadmin/compliance-category-details";
     }
 
+    @GetMapping("/super-admin/history")
+    public String superAdminHistory() {
+        return "superadmin/history";
+    }
+
     // ==================== COMPANY ADMIN VIEWS ====================
 
     @GetMapping("/company-admin/dashboard")
@@ -162,7 +167,7 @@ public class ViewController {
         return "companyadmin/employee-details";
     }
 
-    @GetMapping("/company-admin/company-details")
+    @GetMapping({"/company-admin/company-details", "/company-admin/profile"})
     public String companyDetails() {
         return "companyadmin/company-details";
     }
@@ -246,6 +251,11 @@ public class ViewController {
     @GetMapping("/company-admin/sub-admins")
     public String companyAdminSubAdmins() {
         return "redirect:/company-admin/employees";
+    }
+
+    @GetMapping("/company-admin/history")
+    public String companyAdminHistory() {
+        return "companyadmin/history";
     }
 
     // ==================== EMPLOYEE VIEWS ====================

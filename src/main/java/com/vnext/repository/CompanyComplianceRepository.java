@@ -79,6 +79,14 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "WHERE cc.company.id = :companyId AND cc.isActive = true AND cc.deleted = false")
     List<CompanyCompliance> findByCompanyIdAndIsActiveTrueAndDeletedFalse(@Param("companyId") Long companyId);
 
+    @Query("SELECT DISTINCT cc FROM CompanyCompliance cc " +
+            "JOIN FETCH cc.company " +
+            "JOIN FETCH cc.template " +
+            "LEFT JOIN FETCH cc.subTemplate " +
+            "LEFT JOIN FETCH cc.config " +
+            "WHERE cc.isActive = true AND cc.deleted = false")
+    List<CompanyCompliance> findAllActiveCompliancesWithDetails();
+
 
 
 
@@ -367,9 +375,11 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "WHERE cc.company.id IN :companyIds AND cc.isActive = true AND cc.deleted = false")
     List<CompanyCompliance> findByCompanyIdsWithTemplate(@Param("companyIds") List<Long> companyIds);
 
-    @Query("SELECT cc FROM CompanyCompliance cc " +
-            "LEFT JOIN FETCH cc.template " +
+    @Query("SELECT DISTINCT cc FROM CompanyCompliance cc " +
             "LEFT JOIN FETCH cc.company " +
+            "LEFT JOIN FETCH cc.template " +
+            "LEFT JOIN FETCH cc.subTemplate " +
+            "LEFT JOIN FETCH cc.config " +
             "WHERE cc.company.id = :companyId AND cc.isActive = true AND cc.deleted = false")
     List<CompanyCompliance> findByCompanyIdWithDetails(@Param("companyId") Long companyId);
 
@@ -469,7 +479,7 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
 
     /**
      * Overdue-specific paginated query (no JOIN FETCH, safe with Pageable).
-     * Includes rows with OVERDUE status OR where due date has passed and not COMPLETED.
+     * Includes active, non-completed rows with OVERDUE status OR where due date has passed.
      */
     @Query(value = "SELECT cc FROM CompanyCompliance cc " +
             "LEFT JOIN cc.company c " +
@@ -478,7 +488,10 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "LEFT JOIN cc.config cfg " +
             "WHERE cc.deleted = false " +
             "AND (:companyId IS NULL OR cc.company.id = :companyId) " +
-            "AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED)) " +
+            "AND cc.completedAt IS NULL " +
+            "AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED " +
+            "AND cc.status != com.vnext.entity.ComplianceStatus.EXEMPTED " +
+            "AND ((cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE) OR (cfg.dueDate IS NULL AND cc.status = com.vnext.entity.ComplianceStatus.OVERDUE)) " +
             "AND (:templateId IS NULL OR cc.template.id = :templateId) " +
             "AND (:isActive IS NULL OR cc.isActive = :isActive) " +
             "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
@@ -491,7 +504,10 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "LEFT JOIN cc.config cfg " +
             "WHERE cc.deleted = false " +
             "AND (:companyId IS NULL OR cc.company.id = :companyId) " +
-            "AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED)) " +
+            "AND cc.completedAt IS NULL " +
+            "AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED " +
+            "AND cc.status != com.vnext.entity.ComplianceStatus.EXEMPTED " +
+            "AND ((cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE) OR (cfg.dueDate IS NULL AND cc.status = com.vnext.entity.ComplianceStatus.OVERDUE)) " +
             "AND (:templateId IS NULL OR cc.template.id = :templateId) " +
             "AND (:isActive IS NULL OR cc.isActive = :isActive) " +
             "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
@@ -516,7 +532,7 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "WHERE cc.id IN :ids")
     List<CompanyCompliance> fetchByIds(@Param("ids") List<Long> ids);
 
-    @Query("SELECT COUNT(cc) FROM CompanyCompliance cc LEFT JOIN cc.config cfg WHERE cc.deleted = false AND cc.isActive = true AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED))")
+    @Query("SELECT COUNT(cc) FROM CompanyCompliance cc LEFT JOIN cc.config cfg WHERE cc.deleted = false AND cc.isActive = true AND cc.completedAt IS NULL AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED AND cc.status != com.vnext.entity.ComplianceStatus.EXEMPTED AND ((cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE) OR (cfg.dueDate IS NULL AND cc.status = com.vnext.entity.ComplianceStatus.OVERDUE))")
     long countOverdueActiveAssignments();
 
     @Query("SELECT cc.status, COUNT(cc) FROM CompanyCompliance cc WHERE cc.deleted = false AND cc.isActive = true GROUP BY cc.status")
@@ -532,7 +548,10 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "JOIN cc.company c " +
             "LEFT JOIN cc.config cfg " +
             "WHERE cc.deleted = false AND cc.isActive = true " +
-            "AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED)) " +
+            "AND cc.completedAt IS NULL " +
+            "AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED " +
+            "AND cc.status != com.vnext.entity.ComplianceStatus.EXEMPTED " +
+            "AND ((cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE) OR (cfg.dueDate IS NULL AND cc.status = com.vnext.entity.ComplianceStatus.OVERDUE)) " +
             "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) OR LOWER(c.email) LIKE LOWER(CONCAT('%', :search, '%'))) " +
             "GROUP BY c.id, c.name, c.email " +
             "ORDER BY COUNT(cc) DESC",
@@ -540,7 +559,10 @@ public interface CompanyComplianceRepository extends JpaRepository<CompanyCompli
             "JOIN cc.company c " +
             "LEFT JOIN cc.config cfg " +
             "WHERE cc.deleted = false AND cc.isActive = true " +
-            "AND (cc.status = com.vnext.entity.ComplianceStatus.OVERDUE OR (cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED)) " +
+            "AND cc.completedAt IS NULL " +
+            "AND cc.status != com.vnext.entity.ComplianceStatus.COMPLETED " +
+            "AND cc.status != com.vnext.entity.ComplianceStatus.EXEMPTED " +
+            "AND ((cfg.dueDate IS NOT NULL AND cfg.dueDate < CURRENT_DATE) OR (cfg.dueDate IS NULL AND cc.status = com.vnext.entity.ComplianceStatus.OVERDUE)) " +
             "AND (:search IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :search, '%')) OR LOWER(c.email) LIKE LOWER(CONCAT('%', :search, '%')))")
     Page<Object[]> findOverdueCompaniesSummary(@Param("search") String search, Pageable pageable);
 }

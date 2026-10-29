@@ -1143,6 +1143,9 @@
         <a href="${baseUrl}/super-admin/compliance/templates" class="nav-item">
             <i class="fas fa-tags"></i> Categories
         </a>
+        <a href="${baseUrl}/super-admin/history" class="nav-item">
+            <i class="fas fa-history"></i> Compliance History
+        </a>
 
         <div class="sidebar-label">Push Settings</div>
         <a href="${baseUrl}/super-admin/notifications" class="nav-item">
@@ -1150,6 +1153,9 @@
         </a>
 
         <div class="sidebar-label">Account</div>
+        <a href="${baseUrl}/super-admin/profile" class="nav-item">
+            <i class="fas fa-user-shield"></i> My Profile
+        </a>
         <a href="${baseUrl}/change-password" class="nav-item">
             <i class="fas fa-key"></i> Change Password
         </a>
@@ -1784,6 +1790,7 @@
                 '<td style="text-align:center;">' +
                     '<div style="display:flex;gap:4px;justify-content:center;">' +
                         '<button onclick="viewCompany(' + c.id + ')" class="btn btn-ghost" style="padding:5px 8px;" title="View"><i class="fas fa-eye" style="font-size:12px;"></i></button>' +
+                        '<a href="${baseUrl}/super-admin/history?companyId=' + c.id + '" class="btn btn-ghost" style="padding:5px 8px;color:var(--info);" title="Compliance History"><i class="fas fa-history" style="font-size:12px;"></i></a>' +
                         '<button onclick="openEditCompanyModal(' + c.id + ')" class="btn btn-ghost" style="padding:5px 8px;color:var(--primary);" title="Edit"><i class="fas fa-edit" style="font-size:12px;"></i></button>' +
                         '<button onclick="toggleStatus(' + c.id + ',\'' + c.status + '\')" class="btn ' + (isActive ? 'btn-danger' : 'btn-success') + '" style="padding:5px 8px;" title="' + (isActive ? 'Deactivate' : 'Activate') + '">' +
                             '<i class="fas ' + (isActive ? 'fa-ban' : 'fa-check') + '" style="font-size:12px;"></i>' +

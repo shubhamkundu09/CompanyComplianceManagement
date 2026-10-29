@@ -868,8 +868,17 @@
         <a href="${baseUrl}/company-admin/compliance/parents" class="nav-item">
             <i class="fas fa-tasks"></i> My Compliances
         </a>
+        <a href="${baseUrl}/company-admin/compliance/calendar" class="nav-item">
+            <i class="fas fa-calendar-alt"></i> Calendar View
+        </a>
+        <a href="${baseUrl}/company-admin/history" class="nav-item">
+            <i class="fas fa-history"></i> Compliance History
+        </a>
 
-<div class="sidebar-label">Account</div>
+        <div class="sidebar-label">Account</div>
+        <a href="${baseUrl}/company-admin/company-details" class="nav-item">
+            <i class="fas fa-building"></i> Company Profile
+        </a>
         <a href="${baseUrl}/company-admin/change-password" class="nav-item">
             <i class="fas fa-key"></i> Change Password
         </a>
@@ -890,7 +899,7 @@
             <span class="page-title">Notifications</span>
         </div>
         <div class="header-right">
-            <div class="header-user" onclick="window.location.href='${baseUrl}/company-admin/profile'">
+            <div class="header-user" onclick="window.location.href='${baseUrl}/company-admin/company-details'">
                 <div class="avatar" id="userAvatar">U</div>
                 <div class="user-info">
                     <span class="user-name" id="userName">User</span>
