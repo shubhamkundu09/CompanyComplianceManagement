@@ -591,6 +591,7 @@
         }
         .timeline-dot.danger { border-color: var(--danger); color: var(--danger); }
         .timeline-dot.success { border-color: var(--success); color: var(--success); }
+        .timeline-dot.info { border-color: var(--primary); color: var(--primary); }
         .timeline-content {
             background: var(--gray-50);
             border: 1px solid var(--gray-200);
@@ -1055,14 +1056,35 @@
                 statusBadge = '<span class="badge badge-gray"><i class="fas fa-hourglass-start"></i> ' + (item.status || 'PENDING') + '</span>';
             }
 
+            var isHist = Boolean(item.isHistorical || item.historical || item.historicalRecordId);
+
             // Delay / Completion Info
             var delayInfo = '—';
-            if (item.status === 'OVERDUE' && item.daysOverdue > 0) {
-                delayInfo = '<span class="badge badge-danger" style="font-weight:700;"><i class="fas fa-exclamation-triangle"></i> ' + item.daysOverdue + ' day' + (item.daysOverdue === 1 ? '' : 's') + ' overdue</span>';
+            var daysLate = item.daysOverdue || 0;
+            if (item.status === 'OVERDUE') {
+                if (daysLate === 0 && item.dueDate) {
+                    var dueD = new Date(item.dueDate);
+                    var nowD = new Date();
+                    if (nowD > dueD) {
+                        daysLate = Math.floor((nowD - dueD) / (1000 * 60 * 60 * 24));
+                    }
+                }
+                if (daysLate > 0) {
+                    delayInfo = '<span class="badge badge-danger" style="font-weight:700;"><i class="fas fa-exclamation-triangle"></i> ' + daysLate + ' day' + (daysLate === 1 ? '' : 's') + ' overdue</span>';
+                } else {
+                    delayInfo = '<span class="badge badge-danger"><i class="fas fa-exclamation-circle"></i> OVERDUE</span>';
+                }
             } else if (item.status === 'COMPLETED') {
                 var compDate = item.completedAt ? item.completedAt.split('T')[0] : 'Completed';
-                if (item.completedLate || (item.daysOverdue && item.daysOverdue > 0)) {
-                    delayInfo = '<span class="badge badge-warning" style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d;" title="Completed after due date"><i class="fas fa-clock"></i> ' + compDate + ' (' + item.daysOverdue + ' days late)</span>';
+                if (item.completedLate || daysLate > 0) {
+                    if (daysLate === 0 && item.dueDate && item.completedAt) {
+                        var dueD = new Date(item.dueDate);
+                        var compD = new Date(item.completedAt.split('T')[0]);
+                        if (compD > dueD) {
+                            daysLate = Math.round((compD - dueD) / (1000 * 60 * 60 * 24));
+                        }
+                    }
+                    delayInfo = '<span class="badge badge-warning" style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d;" title="Completed after due date"><i class="fas fa-clock"></i> ' + compDate + ' (' + daysLate + ' day' + (daysLate === 1 ? '' : 's') + ' late)</span>';
                 } else {
                     delayInfo = '<span class="badge badge-success" title="Completed on-time"><i class="fas fa-check"></i> ' + compDate + ' (On-time)</span>';
                 }
@@ -1073,9 +1095,13 @@
             html += '<tr>' +
                 '<td><span style="color: var(--gray-400); font-weight: 500;">#' + rowNum + '</span></td>' +
                 '<td>' +
-                    '<div style="font-weight: 600; color: var(--gray-900);">' + escapeHtml(item.complianceName) + '</div>' +
+                    '<div style="font-weight: 600; color: var(--gray-900); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">' +
+                        escapeHtml(item.complianceName) +
+                        (isHist ? '<span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:10px; font-weight:600;"><i class="fas fa-history"></i> Historical</span>' : '') +
+                    '</div>' +
                     subCompHtml +
                     '<span style="font-size: 11px; color: var(--gray-400);"><i class="fas fa-tag" style="font-size: 9px;"></i> ' + escapeHtml(item.categoryName) + '</span>' +
+                    (item.submissionReference ? '<div style="font-size: 10px; color: var(--gray-500); margin-top: 2px;"><i class="fas fa-receipt"></i> Ref: ' + escapeHtml(item.submissionReference) + '</div>' : '') +
                 '</td>' +
                 '<td><span class="badge badge-info">' + (item.frequency || 'ONE_TIME') + '</span></td>' +
                 '<td><span style="font-weight: 600; color: var(--gray-800);">' + (item.dueDate || '—') + '</span></td>' +
@@ -1083,9 +1109,12 @@
                 '<td>' + statusBadge + '</td>' +
                 '<td>' + delayInfo + '</td>' +
                 '<td>' +
-                    '<button class="btn-log" onclick="openAuditModal(' + item.id + ', \'' + escapeJs(item.complianceName) + '\')">' +
-                        '<i class="fas fa-stream"></i> Audit Log' +
-                    '</button>' +
+                    '<div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">' +
+                        '<button class="btn-log" onclick="openAuditModal(' + item.id + ', \'' + escapeJs(item.complianceName) + '\', ' + isHist + ')">' +
+                            '<i class="fas fa-stream"></i> Audit Log' +
+                        '</button>' +
+                        (item.submissionDocumentUrl ? '<a href="' + contextPath + escapeHtml(item.submissionDocumentUrl) + '" target="_blank" class="btn-log" style="color:var(--primary); font-weight:600;" title="View / Download Document"><i class="fas fa-paperclip"></i> Challan</a>' : '') +
+                    '</div>' +
                 '</td>' +
             '</tr>';
         });
@@ -1093,7 +1122,7 @@
         tbody.innerHTML = html;
     }
 
-    async function openAuditModal(complianceId, title) {
+    async function openAuditModal(complianceId, title, isHistorical) {
         document.getElementById('modalComplianceTitle').textContent = title + ' - History';
         document.getElementById('modalCompanySubtitle').textContent = 'Audit logs & Status transitions';
         var timeline = document.getElementById('modalTimeline');
@@ -1101,7 +1130,8 @@
 
         document.getElementById('auditModal').classList.add('open');
 
-        var res = await apiCall('/api/company-admin/compliance/history/' + complianceId + '/logs');
+        var url = '/api/company-admin/compliance/history/' + complianceId + '/logs' + (isHistorical ? '?historical=true' : '');
+        var res = await apiCall(url);
         if (res && res.success && res.data) {
             var logs = res.data;
             if (logs.length === 0) {
@@ -1119,6 +1149,9 @@
                 } else if (l.action && l.action.indexOf('COMPLETED') !== -1) {
                     dotClass = 'success';
                     dotIcon = 'fa-check-double';
+                } else if (l.action && l.action.indexOf('Historical') !== -1) {
+                    dotClass = 'info';
+                    dotIcon = 'fa-history';
                 }
 
                 var performedAtStr = l.performedAt ? l.performedAt.replace('T', ' ').substring(0, 19) : '—';

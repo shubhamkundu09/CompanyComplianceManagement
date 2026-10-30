@@ -1,5 +1,6 @@
 package com.vnext.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.vnext.entity.ComplianceFrequency;
 import com.vnext.entity.ComplianceStatus;
 import lombok.AllArgsConstructor;
@@ -28,13 +29,23 @@ public class CompanyComplianceHistoryDTO {
     private Integer dueYear;
     private String monthName;
     private ComplianceStatus status;
+
+    @JsonProperty("isOverdue")
     private boolean isOverdue;
+
+    @JsonProperty("completedLate")
     private boolean completedLate;
+
     private Integer daysOverdue;
     private LocalDateTime completedAt;
     private String completedByName;
     private String adminNotes;
     private String submissionReference;
     private String submissionDocumentUrl;
+
+    @JsonProperty("isHistorical")
+    private boolean isHistorical;
+
+    private Long historicalRecordId;
     private List<ComplianceHistoryDTO> historyLogs;
 }

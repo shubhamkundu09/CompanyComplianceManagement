@@ -1127,8 +1127,53 @@ public class SuperAdminController {
     }
 
     @GetMapping("/compliance/history/{complianceId}/logs")
-    public ApiResponse<List<ComplianceHistoryDTO>> getComplianceItemLogs(@PathVariable Long complianceId) {
+    public ApiResponse<List<ComplianceHistoryDTO>> getComplianceItemLogs(
+            @PathVariable Long complianceId,
+            @RequestParam(required = false, defaultValue = "false") boolean historical) {
+        if (historical) {
+            List<ComplianceHistoryDTO> logs = complianceService.getHistoricalComplianceItemLogs(complianceId);
+            return ApiResponse.success(logs, "Compliance history logs retrieved successfully");
+        }
         List<ComplianceHistoryDTO> logs = complianceService.getComplianceItemLogs(complianceId);
         return ApiResponse.success(logs, "Compliance history logs retrieved successfully");
+    }
+
+    @PostMapping("/compliance/history/record")
+    public ApiResponse<CompanyComplianceHistoryDTO> addHistoricalComplianceRecord(
+            @Valid @ModelAttribute HistoricalComplianceRecordRequestDTO dto,
+            @RequestParam(value = "documentFile", required = false) MultipartFile documentFile,
+            @CurrentUser User admin) {
+        CompanyComplianceHistoryDTO result = complianceService.addHistoricalComplianceRecord(dto, documentFile, admin);
+        return ApiResponse.success(result, "Historical compliance record added successfully");
+    }
+
+    @GetMapping("/compliance/history/record/{id}")
+    public ApiResponse<Map<String, Object>> getHistoricalComplianceRecord(
+            @PathVariable Long id,
+            @CurrentUser User admin) {
+        Map<String, Object> data = complianceService.getHistoricalRecordById(id, admin);
+        return ApiResponse.success(data, "Historical compliance record retrieved successfully");
+    }
+
+    @DeleteMapping("/compliance/history/record/{id}")
+    public ApiResponse<Void> deleteHistoricalComplianceRecord(
+            @PathVariable Long id,
+            @CurrentUser User admin) {
+        complianceService.deleteHistoricalComplianceRecord(id, admin);
+        return ApiResponse.success("Historical compliance record deleted successfully");
+    }
+
+    @GetMapping("/compliance/history/calculate-due-date")
+    public ApiResponse<Map<String, Object>> calculateHistoricalDueDate(
+            @RequestParam(required = false) Long companyId,
+            @RequestParam Long templateId,
+            @RequestParam(required = false) Long subTemplateId,
+            @RequestParam int year,
+            @RequestParam int month) {
+        LocalDate dueDate = complianceService.calculateStatutoryDueDate(companyId, templateId, subTemplateId, year, month);
+        Map<String, Object> data = new HashMap<>();
+        data.put("dueDate", dueDate.toString());
+        data.put("dueDay", dueDate.getDayOfMonth());
+        return ApiResponse.success(data, "Statutory due date calculated successfully");
     }
 }

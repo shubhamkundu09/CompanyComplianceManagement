@@ -1194,13 +1194,10 @@ public class CompanyAdminController {
     @GetMapping("/compliance/history/{complianceId}/logs")
     public ApiResponse<List<ComplianceHistoryDTO>> getComplianceItemLogs(
             @CurrentUser User admin,
-            @PathVariable Long complianceId) {
+            @PathVariable Long complianceId,
+            @RequestParam(required = false, defaultValue = "false") boolean historical) {
         Long companyId = getCompanyId(admin);
-        boolean exists = companyComplianceRepository.existsByIdAndCompanyIdAndDeletedFalse(complianceId, companyId);
-        if (!exists) {
-            throw new ResourceNotFoundException("Compliance not found for this company");
-        }
-        List<ComplianceHistoryDTO> logs = complianceService.getComplianceItemLogs(complianceId);
+        List<ComplianceHistoryDTO> logs = complianceService.getComplianceItemLogsForCompany(complianceId, companyId, historical);
         return ApiResponse.success(logs, "Compliance history logs retrieved successfully");
     }
 }

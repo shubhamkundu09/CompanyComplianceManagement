@@ -504,6 +504,28 @@
             border-color: var(--primary);
         }
 
+        .btn-primary-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 9px 16px;
+            font-weight: 600;
+            font-size: 13px;
+            border-radius: var(--radius);
+            background: var(--primary);
+            color: white;
+            border: none;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+            box-shadow: var(--shadow-sm);
+        }
+        .btn-primary-action:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow);
+        }
+
         /* Pagination */
         .pagination-bar {
             padding: 14px 24px;
@@ -610,6 +632,7 @@
         }
         .timeline-dot.danger { border-color: var(--danger); color: var(--danger); }
         .timeline-dot.success { border-color: var(--success); color: var(--success); }
+        .timeline-dot.info { border-color: var(--primary); color: var(--primary); }
         .timeline-content {
             background: var(--gray-50);
             border: 1px solid var(--gray-200);
@@ -760,9 +783,12 @@
                     <label><i class="fas fa-search"></i> Search Compliance / Category</label>
                     <input type="text" id="searchInput" class="form-control" placeholder="Search by name, category..." onkeyup="debounceSearch()">
                 </div>
-                <div style="display: flex; gap: 8px;">
+                <div style="display: flex; gap: 8px; align-items: flex-end;">
                     <button class="btn-log" onclick="resetFilters()" title="Reset All Filters">
                         <i class="fas fa-undo"></i> Reset
+                    </button>
+                    <button class="btn-primary-action" onclick="openAddHistoricalModal()" title="Add Previous Compliance History for a Company">
+                        <i class="fas fa-plus-circle"></i> Add Previous Compliance History
                     </button>
                 </div>
             </div>
@@ -889,6 +915,125 @@
     </div>
 </div>
 
+<!-- ==================== ADD HISTORICAL RECORD MODAL (SUPER ADMIN ONLY) ==================== -->
+<div class="modal" id="addHistoricalModal" onclick="closeHistoricalModalOnOverlay(event)">
+    <div class="modal-content" style="max-width: 650px;">
+        <div class="modal-header">
+            <div>
+                <h3 class="modal-title" id="histModalTitle"><i class="fas fa-history" style="color:var(--primary); margin-right:6px;"></i> Add Previous Compliance History</h3>
+                <p style="font-size: 12px; color: var(--gray-500); margin-top: 2px;" id="histModalSubtitle">Record historical compliance data for a company for past months</p>
+            </div>
+            <button class="btn-close" onclick="closeAddHistoricalModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <form id="historicalRecordForm" onsubmit="handleHistoricalFormSubmit(event)">
+                <input type="hidden" id="histRecordId" name="id" value="">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-building"></i> Select Company *</label>
+                        <select id="histCompanySelect" class="form-control" required onchange="updateSuggestedDueDate()" style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300);">
+                            <option value="">-- Select Company --</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-tags"></i> Category / Template *</label>
+                        <select id="histTemplateSelect" class="form-control" required onchange="onHistTemplateChange()" style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300);">
+                            <option value="">-- Select Category --</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-tasks"></i> Sub-Compliance (Optional)</label>
+                        <select id="histSubTemplateSelect" class="form-control" onchange="updateSuggestedDueDate()" style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300);">
+                            <option value="">-- Main Compliance / None --</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-calendar-alt"></i> Period Year *</label>
+                        <select id="histYearSelect" class="form-control" required onchange="updateSuggestedDueDate()" style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300);">
+                            <option value="2024">2024</option>
+                            <option value="2025">2025</option>
+                            <option value="2026" selected>2026</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-calendar-day"></i> Period Month *</label>
+                        <select id="histMonthSelect" class="form-control" required onchange="updateSuggestedDueDate()" style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300);">
+                            <option value="1">January</option>
+                            <option value="2">February</option>
+                            <option value="3">March</option>
+                            <option value="4">April</option>
+                            <option value="5">May</option>
+                            <option value="6">June</option>
+                            <option value="7">July</option>
+                            <option value="8">August</option>
+                            <option value="9">September</option>
+                            <option value="10">October</option>
+                            <option value="11">November</option>
+                            <option value="12">December</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-calendar-check"></i> Statutory Due Date *</label>
+                        <input type="date" id="histDueDate" class="form-control" readonly required style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300); background-color: var(--gray-100); cursor: not-allowed; color: var(--gray-800); font-weight: 600;">
+                        <small style="font-size:11px; color:var(--gray-500); display:block; margin-top:3px;"><i class="fas fa-lock" style="font-size:10px;"></i> Readonly: Auto-calculated from compliance configuration</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-info-circle"></i> Filing Status *</label>
+                        <div id="histStatusDisplay" style="padding:9px 12px; border-radius:var(--radius); border:1px solid #86efac; background:#f0fdf4; font-weight:600; font-size:13px; display:flex; align-items:center; gap:8px;">
+                            <span style="color:var(--success); display:flex; align-items:center; gap:6px;"><i class="fas fa-check-circle"></i> Completed (Filed on time)</span>
+                        </div>
+                        <input type="hidden" id="histStatusSelect" name="status" value="COMPLETED">
+                        <small style="font-size:11px; color:var(--gray-500); display:block; margin-top:3px;"><i class="fas fa-calculator" style="font-size:10px;"></i> Auto-calculated according to due date & actual filing date</small>
+                    </div>
+
+                    <div class="form-group" id="histCompletedAtGroup">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label style="font-size:12px; font-weight:600; color:var(--gray-700); margin-bottom:0;"><i class="fas fa-clock"></i> Actual Filing Date</label>
+                            <button type="button" onclick="setFilingDateToDueDate()" style="font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px; border:1px solid var(--primary); background:var(--primary-light); color:var(--primary); cursor:pointer;">
+                                <i class="fas fa-magic"></i> Filed on Due Date
+                            </button>
+                        </div>
+                        <input type="datetime-local" id="histCompletedAt" class="form-control" onchange="recalculateFilingStatus()" oninput="recalculateFilingStatus()" style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300);">
+                        <small style="font-size:11px; color:var(--gray-500); display:block; margin-top:3px;">Select actual date filed, or leave empty if overdue</small>
+                    </div>
+
+                    <div class="form-group" id="histRefGroup">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-receipt"></i> Acknowledgement / ARN / Challan Ref</label>
+                        <input type="text" id="histSubmissionRef" class="form-control" placeholder="e.g. ARN-AA070326001234Z" style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300);">
+                    </div>
+
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-file-upload"></i> Upload Challan / Receipt PDF / Image</label>
+                        <div id="histCurrentChallan" style="display:none; margin-bottom:8px; font-size:12px; padding:6px 12px; background:#eff6ff; border-radius:6px; border:1px solid #bfdbfe; color:var(--primary);"></div>
+                        <input type="file" id="histDocumentFile" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx" style="width:100%; padding:8px 12px; border-radius:var(--radius); border:1px solid var(--gray-300);">
+                        <small style="font-size:11px; color:var(--gray-500); display:block; margin-top:2px;">Leave empty to keep existing document (if editing)</small>
+                    </div>
+
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label style="font-size:12px; font-weight:600; color:var(--gray-700);"><i class="fas fa-sticky-note"></i> Remarks / Super Admin Notes</label>
+                        <textarea id="histRemarks" class="form-control" rows="2" placeholder="e.g. Backfilled from client's prior portal records during onboarding" style="width:100%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--gray-300); font-family:inherit;"></textarea>
+                    </div>
+                </div>
+
+                <div id="histFormAlert" style="display:none; margin-top:14px; padding:10px 14px; border-radius:var(--radius); font-size:12px;"></div>
+
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--gray-200); padding-top:16px;">
+                    <button type="button" class="btn-log" onclick="closeAddHistoricalModal()">Cancel</button>
+                    <button type="submit" id="btnSaveHistorical" style="padding:9px 20px; font-weight:600; border-radius:var(--radius); background:var(--primary); color:white; border:none; cursor:pointer;">
+                        <i class="fas fa-save"></i> Save Compliance Record
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
     var contextPath = '${baseUrl}';
     var token = localStorage.getItem('accessToken') || '';
@@ -942,15 +1087,15 @@
     });
 
     // Helper for API calls with abort signal support
-    async function apiCall(url, signal) {
+    async function apiCall(url, signal, extraOptions) {
         var authToken = localStorage.getItem('accessToken') || '';
         try {
-            var options = {
+            var options = Object.assign({
                 headers: {
                     'Authorization': 'Bearer ' + authToken,
                     'Content-Type': 'application/json'
                 }
-            };
+            }, extraOptions || {});
             if (signal) {
                 options.signal = signal;
             }
@@ -970,6 +1115,8 @@
         }
     }
 
+    var cachedCompanies = [];
+
     // Load active companies into dropdown
     async function loadCompaniesDropdown(selectedId) {
         var select = document.getElementById('companySelect');
@@ -977,6 +1124,7 @@
         var res = await apiCall('/api/super-admin/companies?size=100');
         if (res && res.success && res.data) {
             var companies = res.data.content || res.data || [];
+            cachedCompanies = companies;
             companies.forEach(function(c) {
                 var opt = document.createElement('option');
                 opt.value = c.id;
@@ -1137,14 +1285,37 @@
                 statusBadge = '<span class="badge badge-gray"><i class="fas fa-hourglass-start"></i> ' + (item.status || 'PENDING') + '</span>';
             }
 
+            // Identify if this is a historical backfill record
+            var isHist = Boolean(item.isHistorical || item.historical || item.historicalRecordId);
+            var histId = item.historicalRecordId || (isHist ? item.id : null);
+
             // Delay / Completion Info
             var delayInfo = '—';
-            if (item.status === 'OVERDUE' && item.daysOverdue > 0) {
-                delayInfo = '<span class="badge badge-danger" style="font-weight:700;"><i class="fas fa-exclamation-triangle"></i> ' + item.daysOverdue + ' day' + (item.daysOverdue === 1 ? '' : 's') + ' overdue</span>';
+            var daysLate = item.daysOverdue || 0;
+            if (item.status === 'OVERDUE') {
+                if (daysLate === 0 && item.dueDate) {
+                    var dueD = new Date(item.dueDate);
+                    var nowD = new Date();
+                    if (nowD > dueD) {
+                        daysLate = Math.floor((nowD - dueD) / (1000 * 60 * 60 * 24));
+                    }
+                }
+                if (daysLate > 0) {
+                    delayInfo = '<span class="badge badge-danger" style="font-weight:700;"><i class="fas fa-exclamation-triangle"></i> ' + daysLate + ' day' + (daysLate === 1 ? '' : 's') + ' overdue</span>';
+                } else {
+                    delayInfo = '<span class="badge badge-danger"><i class="fas fa-exclamation-circle"></i> OVERDUE</span>';
+                }
             } else if (item.status === 'COMPLETED') {
                 var compDate = item.completedAt ? item.completedAt.split('T')[0] : 'Completed';
-                if (item.completedLate || (item.daysOverdue && item.daysOverdue > 0)) {
-                    delayInfo = '<span class="badge badge-warning" style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d;" title="Completed after due date"><i class="fas fa-clock"></i> ' + compDate + ' (' + item.daysOverdue + ' days late)</span>';
+                if (item.completedLate || daysLate > 0) {
+                    if (daysLate === 0 && item.dueDate && item.completedAt) {
+                        var dueD = new Date(item.dueDate);
+                        var compD = new Date(item.completedAt.split('T')[0]);
+                        if (compD > dueD) {
+                            daysLate = Math.round((compD - dueD) / (1000 * 60 * 60 * 24));
+                        }
+                    }
+                    delayInfo = '<span class="badge badge-warning" style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d;" title="Completed after due date"><i class="fas fa-clock"></i> ' + compDate + ' (' + daysLate + ' day' + (daysLate === 1 ? '' : 's') + ' late)</span>';
                 } else {
                     delayInfo = '<span class="badge badge-success" title="Completed on-time"><i class="fas fa-check"></i> ' + compDate + ' (On-time)</span>';
                 }
@@ -1152,6 +1323,14 @@
 
             var compInitial = item.companyName ? item.companyName.charAt(0).toUpperCase() : 'C';
             var subCompHtml = item.subComplianceName ? '<div style="font-size: 11px; color: var(--gray-500);"><i class="fas fa-arrow-turn-down-right" style="font-size: 9px;"></i> ' + escapeHtml(item.subComplianceName) + '</div>' : '';
+
+            var histBadge = isHist ? '<span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:10px; font-weight:600;"><i class="fas fa-history"></i> Historical</span>' : '';
+
+            var histActionButtons = '';
+            if (isHist && histId) {
+                histActionButtons = '<button class="btn-log" style="color:var(--primary); border-color:#c7d2fe;" onclick="openEditHistoricalModal(' + histId + ')" title="Edit Historical Record"><i class="fas fa-edit"></i> Edit</button>' +
+                                    '<button class="btn-log" style="color:var(--danger); border-color:#fee2e2;" onclick="deleteHistoricalRecord(' + histId + ')" title="Delete Historical Record"><i class="fas fa-trash-alt"></i> Delete</button>';
+            }
 
             html += '<tr>' +
                 '<td><span style="color: var(--gray-400); font-weight: 500;">#' + rowNum + '</span></td>' +
@@ -1162,9 +1341,13 @@
                     '</div>' +
                 '</td>' +
                 '<td>' +
-                    '<div style="font-weight: 600; color: var(--gray-900);">' + escapeHtml(item.complianceName) + '</div>' +
+                    '<div style="font-weight: 600; color: var(--gray-900); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">' +
+                        escapeHtml(item.complianceName) +
+                        histBadge +
+                    '</div>' +
                     subCompHtml +
                     '<span style="font-size: 11px; color: var(--gray-400);"><i class="fas fa-tag" style="font-size: 9px;"></i> ' + escapeHtml(item.categoryName) + '</span>' +
+                    (item.submissionReference ? '<div style="font-size: 10px; color: var(--gray-500); margin-top: 2px;"><i class="fas fa-receipt"></i> Ref: ' + escapeHtml(item.submissionReference) + '</div>' : '') +
                 '</td>' +
                 '<td><span class="badge badge-info">' + (item.frequency || 'ONE_TIME') + '</span></td>' +
                 '<td><span style="font-weight: 600; color: var(--gray-800);">' + (item.dueDate || '—') + '</span></td>' +
@@ -1172,9 +1355,13 @@
                 '<td>' + statusBadge + '</td>' +
                 '<td>' + delayInfo + '</td>' +
                 '<td>' +
-                    '<button class="btn-log" onclick="openAuditModal(' + item.id + ', \'' + escapeJs(item.complianceName) + '\', \'' + escapeJs(item.companyName) + '\')">' +
-                        '<i class="fas fa-stream"></i> Audit Log' +
-                    '</button>' +
+                    '<div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">' +
+                        '<button class="btn-log" onclick="openAuditModal(' + item.id + ', \'' + escapeJs(item.complianceName) + '\', \'' + escapeJs(item.companyName) + '\', ' + isHist + ')">' +
+                            '<i class="fas fa-stream"></i> Audit Log' +
+                        '</button>' +
+                        (item.submissionDocumentUrl ? '<a href="' + contextPath + escapeHtml(item.submissionDocumentUrl) + '" target="_blank" class="btn-log" style="color:var(--primary); font-weight:600;" title="View / Download Document"><i class="fas fa-paperclip"></i> Challan</a>' : '') +
+                        histActionButtons +
+                    '</div>' +
                 '</td>' +
             '</tr>';
         });
@@ -1183,7 +1370,7 @@
     }
 
     // Open Audit Trail Modal
-    async function openAuditModal(complianceId, title, company) {
+    async function openAuditModal(complianceId, title, company, isHistorical) {
         document.getElementById('modalComplianceTitle').textContent = title + ' - History';
         document.getElementById('modalCompanySubtitle').textContent = 'Company: ' + company;
         var timeline = document.getElementById('modalTimeline');
@@ -1191,7 +1378,8 @@
 
         document.getElementById('auditModal').classList.add('open');
 
-        var res = await apiCall('/api/super-admin/compliance/history/' + complianceId + '/logs');
+        var url = '/api/super-admin/compliance/history/' + complianceId + '/logs' + (isHistorical ? '?historical=true' : '');
+        var res = await apiCall(url);
         if (res && res.success && res.data) {
             var logs = res.data;
             if (logs.length === 0) {
@@ -1209,6 +1397,9 @@
                 } else if (l.action && l.action.indexOf('COMPLETED') !== -1) {
                     dotClass = 'success';
                     dotIcon = 'fa-check-double';
+                } else if (l.action && l.action.indexOf('Historical') !== -1) {
+                    dotClass = 'info';
+                    dotIcon = 'fa-history';
                 }
 
                 var performedAtStr = l.performedAt ? l.performedAt.replace('T', ' ').substring(0, 19) : '—';
@@ -1347,6 +1538,424 @@
     function escapeJs(str) {
         if (!str) return '';
         return String(str).replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    // ==================== HISTORICAL RECORD FUNCTIONS ====================
+    var cachedTemplates = [];
+
+    async function loadTemplatesForHistoricalModal() {
+        if (cachedTemplates.length > 0) return cachedTemplates;
+        try {
+            var res = await apiCall('/api/super-admin/compliance/templates?page=0&size=100');
+            if (res && res.success && res.data) {
+                cachedTemplates = res.data.content || [];
+            }
+        } catch (e) {
+            console.error('Failed to load templates:', e);
+        }
+        return cachedTemplates;
+    }
+
+    async function openAddHistoricalModal() {
+        var modal = document.getElementById('addHistoricalModal');
+        var form = document.getElementById('historicalRecordForm');
+        form.reset();
+        document.getElementById('histFormAlert').style.display = 'none';
+        document.getElementById('histRecordId').value = '';
+
+        document.getElementById('histModalTitle').innerHTML = '<i class="fas fa-history" style="color:var(--primary); margin-right:6px;"></i> Add Previous Compliance History';
+        document.getElementById('histModalSubtitle').textContent = 'Record historical compliance data for a company for past months';
+        document.getElementById('btnSaveHistorical').innerHTML = '<i class="fas fa-save"></i> Save Compliance Record';
+        var challanDiv = document.getElementById('histCurrentChallan');
+        if (challanDiv) {
+            challanDiv.style.display = 'none';
+            challanDiv.innerHTML = '';
+        }
+
+        // Populate company select
+        var histCompSelect = document.getElementById('histCompanySelect');
+        histCompSelect.innerHTML = '<option value="">-- Select Company --</option>';
+        if (cachedCompanies && cachedCompanies.length > 0) {
+            cachedCompanies.forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name + (c.companyCode ? ' (' + c.companyCode + ')' : '');
+                histCompSelect.appendChild(opt);
+            });
+        }
+        // Pre-select current filter company if one was selected
+        var mainCompanyVal = document.getElementById('companySelect').value;
+        if (mainCompanyVal) {
+            histCompSelect.value = mainCompanyVal;
+        }
+
+        // Populate category/template select
+        var histTplSelect = document.getElementById('histTemplateSelect');
+        histTplSelect.innerHTML = '<option value="">-- Select Category --</option>';
+        var templates = await loadTemplatesForHistoricalModal();
+        templates.forEach(function(t) {
+            var opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = t.name;
+            histTplSelect.appendChild(opt);
+        });
+
+        document.getElementById('histSubTemplateSelect').innerHTML = '<option value="">-- Main Compliance / None --</option>';
+
+        // Set default month to last month
+        var today = new Date();
+        var curYear = today.getFullYear();
+        var curMonth = today.getMonth() + 1;
+        var prevMonth = curMonth - 1;
+        var prevYear = curYear;
+        if (prevMonth < 1) {
+            prevMonth = 12;
+            prevYear = curYear - 1;
+        }
+
+        document.getElementById('histYearSelect').value = prevYear;
+        document.getElementById('histMonthSelect').value = prevMonth;
+        document.getElementById('histCompletedAt').value = '';
+
+        modal.classList.add('open');
+        await updateSuggestedDueDate();
+    }
+
+    async function openEditHistoricalModal(recordId) {
+        var modal = document.getElementById('addHistoricalModal');
+        var form = document.getElementById('historicalRecordForm');
+        form.reset();
+        document.getElementById('histFormAlert').style.display = 'none';
+        document.getElementById('histRecordId').value = recordId;
+
+        document.getElementById('histModalTitle').innerHTML = '<i class="fas fa-edit" style="color:var(--primary); margin-right:6px;"></i> Edit Previous Compliance History';
+        document.getElementById('histModalSubtitle').textContent = 'Update previously added compliance history record';
+        document.getElementById('btnSaveHistorical').innerHTML = '<i class="fas fa-save"></i> Update Compliance Record';
+
+        var histCompSelect = document.getElementById('histCompanySelect');
+        histCompSelect.innerHTML = '<option value="">-- Select Company --</option>';
+        if (cachedCompanies && cachedCompanies.length > 0) {
+            cachedCompanies.forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name + (c.companyCode ? ' (' + c.companyCode + ')' : '');
+                histCompSelect.appendChild(opt);
+            });
+        }
+
+        var histTplSelect = document.getElementById('histTemplateSelect');
+        histTplSelect.innerHTML = '<option value="">-- Select Category --</option>';
+        var templates = await loadTemplatesForHistoricalModal();
+        templates.forEach(function(t) {
+            var opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = t.name;
+            histTplSelect.appendChild(opt);
+        });
+
+        modal.classList.add('open');
+
+        try {
+            var res = await apiCall('/api/super-admin/compliance/history/record/' + recordId);
+            if (res && res.success && res.data) {
+                var d = res.data;
+                histCompSelect.value = String(d.companyId || '');
+                histTplSelect.value = String(d.templateId || '');
+
+                var subSelect = document.getElementById('histSubTemplateSelect');
+                subSelect.innerHTML = '<option value="">-- Main Compliance / None --</option>';
+                if (d.templateId) {
+                    var subRes = await apiCall('/api/super-admin/compliance/sub-templates?parentId=' + d.templateId);
+                    if (subRes && subRes.success && subRes.data) {
+                        subRes.data.forEach(function(st) {
+                            var opt = document.createElement('option');
+                            opt.value = st.id;
+                            opt.textContent = st.name;
+                            if (d.subTemplateId && String(st.id) === String(d.subTemplateId)) {
+                                opt.selected = true;
+                            }
+                            subSelect.appendChild(opt);
+                        });
+                    }
+                }
+
+                document.getElementById('histYearSelect').value = String(d.year || '2026');
+                document.getElementById('histMonthSelect').value = String(d.month || '1');
+                document.getElementById('histDueDate').value = d.dueDate || '';
+
+                if (d.completedAt) {
+                    var cAt = d.completedAt.length >= 16 ? d.completedAt.substring(0, 16) : d.completedAt;
+                    document.getElementById('histCompletedAt').value = cAt;
+                } else {
+                    document.getElementById('histCompletedAt').value = '';
+                }
+
+                document.getElementById('histSubmissionRef').value = d.submissionReference || '';
+                document.getElementById('histRemarks').value = d.remarks || '';
+
+                var challanDiv = document.getElementById('histCurrentChallan');
+                if (d.submissionDocumentUrl) {
+                    challanDiv.style.display = 'block';
+                    challanDiv.innerHTML = '<i class="fas fa-file-pdf"></i> Current Document: <a href="' + contextPath + escapeHtml(d.submissionDocumentUrl) + '" target="_blank" style="font-weight:600; text-decoration:underline;">View / Download Challan</a>';
+                } else {
+                    challanDiv.style.display = 'none';
+                    challanDiv.innerHTML = '';
+                }
+
+                recalculateFilingStatus();
+            } else {
+                showToast(res && res.message ? res.message : 'Failed to load record details', 'error');
+            }
+        } catch (e) {
+            console.error('Failed to load historical record:', e);
+            showToast('Failed to load historical record details', 'error');
+        }
+    }
+
+    function closeAddHistoricalModal() {
+        document.getElementById('addHistoricalModal').classList.remove('open');
+    }
+
+    function closeHistoricalModalOnOverlay(e) {
+        if (e.target.id === 'addHistoricalModal') closeAddHistoricalModal();
+    }
+
+    async function onHistTemplateChange() {
+        var tplId = document.getElementById('histTemplateSelect').value;
+        var subSelect = document.getElementById('histSubTemplateSelect');
+        subSelect.innerHTML = '<option value="">-- Main Compliance / None --</option>';
+        if (tplId) {
+            try {
+                var res = await apiCall('/api/super-admin/compliance/sub-templates?parentId=' + tplId);
+                if (res && res.success && res.data) {
+                    res.data.forEach(function(st) {
+                        var opt = document.createElement('option');
+                        opt.value = st.id;
+                        opt.textContent = st.name;
+                        subSelect.appendChild(opt);
+                    });
+                }
+            } catch (e) {
+                console.error('Failed to load sub-templates:', e);
+            }
+        }
+        await updateSuggestedDueDate();
+    }
+
+    async function updateSuggestedDueDate() {
+        var companyId = document.getElementById('histCompanySelect').value;
+        var templateId = document.getElementById('histTemplateSelect').value;
+        var subTemplateId = document.getElementById('histSubTemplateSelect').value;
+        var year = document.getElementById('histYearSelect').value;
+        var month = document.getElementById('histMonthSelect').value;
+
+        if (!templateId || !year || !month) {
+            var mStr = parseInt(month) < 10 ? '0' + parseInt(month) : month;
+            document.getElementById('histDueDate').value = year && month ? (year + '-' + mStr + '-20') : '';
+            recalculateFilingStatus();
+            return;
+        }
+
+        try {
+            var url = '/api/super-admin/compliance/history/calculate-due-date?templateId=' + templateId +
+                      '&year=' + year + '&month=' + month;
+            if (companyId) url += '&companyId=' + companyId;
+            if (subTemplateId) url += '&subTemplateId=' + subTemplateId;
+
+            var res = await apiCall(url);
+            if (res && res.success && res.data && res.data.dueDate) {
+                document.getElementById('histDueDate').value = res.data.dueDate;
+            } else {
+                var mStr = parseInt(month) < 10 ? '0' + parseInt(month) : month;
+                document.getElementById('histDueDate').value = year + '-' + mStr + '-20';
+            }
+        } catch (e) {
+            var mStr = parseInt(month) < 10 ? '0' + parseInt(month) : month;
+            document.getElementById('histDueDate').value = year + '-' + mStr + '-20';
+        }
+        recalculateFilingStatus();
+    }
+
+    function setFilingDateToDueDate() {
+        var dueDate = document.getElementById('histDueDate').value;
+        if (dueDate) {
+            document.getElementById('histCompletedAt').value = dueDate + 'T18:00';
+            recalculateFilingStatus();
+        }
+    }
+
+    function recalculateFilingStatus() {
+        var dueDateStr = document.getElementById('histDueDate').value;
+        var completedAtStr = document.getElementById('histCompletedAt').value;
+        var displayDiv = document.getElementById('histStatusDisplay');
+        var statusInput = document.getElementById('histStatusSelect');
+
+        if (!completedAtStr) {
+            statusInput.value = 'OVERDUE';
+            displayDiv.innerHTML = '<span style="color:var(--danger); display:flex; align-items:center; gap:6px;"><i class="fas fa-exclamation-circle"></i> Overdue (Not filed)</span>';
+            displayDiv.style.borderColor = '#fca5a5';
+            displayDiv.style.background = '#fef2f2';
+            return;
+        }
+
+        var compDate = completedAtStr.split('T')[0];
+        if (!dueDateStr) {
+            statusInput.value = 'COMPLETED';
+            displayDiv.innerHTML = '<span style="color:var(--success); display:flex; align-items:center; gap:6px;"><i class="fas fa-check-circle"></i> Completed</span>';
+            displayDiv.style.borderColor = '#86efac';
+            displayDiv.style.background = '#f0fdf4';
+            return;
+        }
+
+        if (compDate <= dueDateStr) {
+            statusInput.value = 'COMPLETED';
+            displayDiv.innerHTML = '<span style="color:var(--success); display:flex; align-items:center; gap:6px;"><i class="fas fa-check-circle"></i> Completed (Filed on time)</span>';
+            displayDiv.style.borderColor = '#86efac';
+            displayDiv.style.background = '#f0fdf4';
+        } else {
+            var dueObj = new Date(dueDateStr);
+            var compObj = new Date(compDate);
+            var diffTime = compObj.getTime() - dueObj.getTime();
+            var diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            statusInput.value = 'COMPLETED';
+            displayDiv.innerHTML = '<span style="color:#b45309; display:flex; align-items:center; gap:6px;"><i class="fas fa-clock"></i> Completed (Filed Late &bull; ' + diffDays + ' day' + (diffDays === 1 ? '' : 's') + ' late)</span>';
+            displayDiv.style.borderColor = '#fcd34d';
+            displayDiv.style.background = '#fffbeb';
+        }
+    }
+
+    async function handleHistoricalFormSubmit(e) {
+        e.preventDefault();
+        var alertBox = document.getElementById('histFormAlert');
+        alertBox.style.display = 'none';
+
+        var year = parseInt(document.getElementById('histYearSelect').value);
+        var month = parseInt(document.getElementById('histMonthSelect').value);
+        var dueDateStr = document.getElementById('histDueDate').value;
+
+        // Validation: Must be past month/date
+        var today = new Date();
+        var curYear = today.getFullYear();
+        var curMonth = today.getMonth() + 1;
+        var todayStr = today.toISOString().split('T')[0];
+
+        if (year > curYear || (year === curYear && month >= curMonth)) {
+            if (dueDateStr >= todayStr) {
+                alertBox.className = 'alert-danger';
+                alertBox.style.display = 'block';
+                alertBox.style.background = '#fee2e2';
+                alertBox.style.color = '#b91c1c';
+                alertBox.style.border = '1px solid #f87171';
+                alertBox.innerHTML = '<i class="fas fa-exclamation-circle"></i> <b>Only past/previous compliance records</b> can be added to history. Current and future months are managed via active workflows.';
+                return;
+            }
+        }
+
+        var btn = document.getElementById('btnSaveHistorical');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+
+        try {
+            var formData = new FormData();
+            var editId = document.getElementById('histRecordId').value;
+            if (editId) {
+                formData.append('id', editId);
+            }
+            formData.append('companyId', document.getElementById('histCompanySelect').value);
+            formData.append('templateId', document.getElementById('histTemplateSelect').value);
+            var subId = document.getElementById('histSubTemplateSelect').value;
+            if (subId) formData.append('subTemplateId', subId);
+            formData.append('year', year);
+            formData.append('month', month);
+            formData.append('dueDate', dueDateStr);
+            formData.append('status', document.getElementById('histStatusSelect').value);
+
+            var compAt = document.getElementById('histCompletedAt').value;
+            if (compAt) formData.append('completedAt', compAt);
+
+            var subRef = document.getElementById('histSubmissionRef').value.trim();
+            if (subRef) formData.append('submissionReference', subRef);
+
+            var remarks = document.getElementById('histRemarks').value.trim();
+            if (remarks) formData.append('remarks', remarks);
+
+            var fileInput = document.getElementById('histDocumentFile');
+            if (fileInput && fileInput.files && fileInput.files.length > 0) {
+                formData.append('documentFile', fileInput.files[0]);
+            }
+
+            var token = localStorage.getItem('accessToken') || '';
+            var resp = await fetch(contextPath + '/api/super-admin/compliance/history/record', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token
+                },
+                body: formData
+            });
+
+            var result = await resp.json();
+            if (resp.ok && result.success) {
+                closeAddHistoricalModal();
+                showToast(editId ? 'Previous compliance record updated successfully!' : 'Previous compliance record saved successfully!', 'success');
+                loadHistorySummary();
+                loadHistoryRecords();
+            } else {
+                alertBox.style.display = 'block';
+                alertBox.style.background = '#fee2e2';
+                alertBox.style.color = '#b91c1c';
+                alertBox.style.border = '1px solid #f87171';
+                alertBox.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + escapeHtml(result.message || 'Failed to save historical record');
+            }
+        } catch (err) {
+            console.error('Save historical record error:', err);
+            alertBox.style.display = 'block';
+            alertBox.style.background = '#fee2e2';
+            alertBox.style.color = '#b91c1c';
+            alertBox.style.border = '1px solid #f87171';
+            alertBox.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Network or server error occurred.';
+        } finally {
+            btn.disabled = false;
+            var isEditing = Boolean(document.getElementById('histRecordId').value);
+            btn.innerHTML = '<i class="fas fa-save"></i> ' + (isEditing ? 'Update Compliance Record' : 'Save Compliance Record');
+        }
+    }
+
+    async function deleteHistoricalRecord(id) {
+        if (!confirm('Are you sure you want to delete this historical compliance record? This cannot be undone.')) {
+            return;
+        }
+        try {
+            var res = await apiCall('/api/super-admin/compliance/history/record/' + id, null, { method: 'DELETE' });
+            if (res && res.success) {
+                showToast('Historical record deleted successfully', 'success');
+                loadHistorySummary();
+                loadHistoryRecords();
+            } else {
+                showToast(res && res.message ? res.message : 'Failed to delete record', 'error');
+            }
+        } catch (e) {
+            showToast('Error deleting historical record', 'error');
+        }
+    }
+
+    function showToast(msg, type) {
+        var container = document.getElementById('toastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toastContainer';
+            container.style.cssText = 'position:fixed; bottom:24px; right:24px; z-index:9999; display:flex; flex-direction:column; gap:8px; pointer-events:none;';
+            document.body.appendChild(container);
+        }
+        var toast = document.createElement('div');
+        var bg = type === 'error' ? '#ef4444' : '#10b981';
+        toast.style.cssText = 'background:' + bg + '; color:white; padding:12px 20px; border-radius:10px; font-size:13px; font-weight:600; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1); display:flex; align-items:center; gap:8px; animation:modalIn 0.2s ease-out; pointer-events:auto;';
+        toast.innerHTML = (type === 'error' ? '<i class="fas fa-exclamation-circle"></i> ' : '<i class="fas fa-check-circle"></i> ') + escapeHtml(msg);
+        container.appendChild(toast);
+        setTimeout(function() {
+            toast.style.opacity = '0';
+            toast.style.transition = 'opacity 0.3s';
+            setTimeout(function() { toast.remove(); }, 300);
+        }, 3500);
     }
 </script>
 

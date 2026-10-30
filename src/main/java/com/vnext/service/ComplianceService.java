@@ -10,6 +10,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -17,6 +18,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -48,6 +50,12 @@ public class ComplianceService {
 
     @PersistenceContext
     private EntityManager entityManager;
+
+    @Autowired(required = false)
+    private CompanyComplianceHistoricalRecordRepository historicalRecordRepository;
+
+    @Autowired(required = false)
+    private DocumentStorageService documentStorageService;
 
     // ==================== SUPER ADMIN COMPLIANCE MANAGEMENT ====================
 
@@ -4307,7 +4315,7 @@ if (parentCC == null) {
                     .build());
         }
 
-        List<CompanyComplianceHistoryDTO> allOccurrences = generateYearlyHistoryOccurrences(all, targetYear, today, monthNames);
+        List<CompanyComplianceHistoryDTO> allOccurrences = generateYearlyHistoryOccurrences(all, companyId, targetYear, today, monthNames);
 
         long totalOverdue = 0;
         long totalCompleted = 0;
@@ -4387,7 +4395,7 @@ if (parentCC == null) {
                 "July", "August", "September", "October", "November", "December"
         };
 
-        List<CompanyComplianceHistoryDTO> allOccurrences = generateYearlyHistoryOccurrences(all, year, today, monthNames);
+        List<CompanyComplianceHistoryDTO> allOccurrences = generateYearlyHistoryOccurrences(all, companyId, year, today, monthNames);
         List<CompanyComplianceHistoryDTO> filteredList = new ArrayList<>();
 
         for (CompanyComplianceHistoryDTO item : allOccurrences) {
@@ -4447,6 +4455,11 @@ if (parentCC == null) {
 
     public List<CompanyComplianceHistoryDTO> generateYearlyHistoryOccurrences(
             List<CompanyCompliance> activeItems, int targetYear, LocalDate today, String[] monthNames) {
+        return generateYearlyHistoryOccurrences(activeItems, null, targetYear, today, monthNames);
+    }
+
+    public List<CompanyComplianceHistoryDTO> generateYearlyHistoryOccurrences(
+            List<CompanyCompliance> activeItems, Long targetCompanyId, int targetYear, LocalDate today, String[] monthNames) {
 
         List<CompanyComplianceHistoryDTO> occurrences = new ArrayList<>();
         int currentYear = today.getYear();
@@ -4602,6 +4615,7 @@ if (parentCC == null) {
 
                 CompanyComplianceHistoryDTO dto = CompanyComplianceHistoryDTO.builder()
                         .id(cc.getId())
+                        .isHistorical(false)
                         .companyId(cc.getCompany() != null ? cc.getCompany().getId() : null)
                         .companyName(compName)
                         .complianceName(templateName)
@@ -4627,13 +4641,469 @@ if (parentCC == null) {
             }
         }
 
+        // Merge explicit backfilled historical records entered by Super Admin
+        if (historicalRecordRepository != null) {
+            List<CompanyComplianceHistoricalRecord> histRecords;
+            if (targetCompanyId != null && targetCompanyId > 0) {
+                histRecords = historicalRecordRepository.findByCompanyIdAndYearWithDetails(targetCompanyId, targetYear);
+            } else {
+                histRecords = historicalRecordRepository.findByYearWithDetails(targetYear);
+            }
+
+            for (CompanyComplianceHistoricalRecord hr : histRecords) {
+                int m = hr.getPeriodMonth();
+                String mName = (m >= 1 && m <= 12) ? monthNames[m - 1] : "Month " + m;
+                boolean isOverdue = hr.getStatus() == ComplianceStatus.OVERDUE;
+                int daysOverdue = 0;
+                if (isOverdue && hr.getDueDate() != null && hr.getDueDate().isBefore(today)) {
+                    daysOverdue = (int) ChronoUnit.DAYS.between(hr.getDueDate(), today);
+                } else if (hr.getStatus() == ComplianceStatus.COMPLETED && hr.isCompletedLate() && hr.getCompletedAt() != null && hr.getDueDate() != null && hr.getCompletedAt().toLocalDate().isAfter(hr.getDueDate())) {
+                    daysOverdue = (int) ChronoUnit.DAYS.between(hr.getDueDate(), hr.getCompletedAt().toLocalDate());
+                }
+
+                CompanyComplianceHistoryDTO histDto = CompanyComplianceHistoryDTO.builder()
+                        .id(hr.getId())
+                        .historicalRecordId(hr.getId())
+                        .isHistorical(true)
+                        .companyId(hr.getCompany() != null ? hr.getCompany().getId() : null)
+                        .companyName(hr.getCompany() != null ? hr.getCompany().getName() : "")
+                        .complianceName(hr.getTemplate() != null ? hr.getTemplate().getName() : "")
+                        .subComplianceName(hr.getSubTemplate() != null ? hr.getSubTemplate().getName() : null)
+                        .categoryName(hr.getTemplate() != null ? hr.getTemplate().getName() : "General")
+                        .frequency(ComplianceFrequency.MONTHLY)
+                        .dueDate(hr.getDueDate())
+                        .dueMonth(m)
+                        .dueYear(hr.getPeriodYear())
+                        .monthName(mName)
+                        .status(hr.getStatus())
+                        .isOverdue(isOverdue)
+                        .completedLate(Boolean.TRUE.equals(hr.getCompletedLate()))
+                        .daysOverdue(daysOverdue)
+                        .completedAt(hr.getCompletedAt())
+                        .completedByName(hr.getCreatedByName() != null ? hr.getCreatedByName() : "Super Admin")
+                        .adminNotes(hr.getRemarks())
+                        .submissionReference(hr.getSubmissionReference())
+                        .submissionDocumentUrl(hr.getSubmissionDocumentUrl())
+                        .build();
+
+                int matchIdx = -1;
+                for (int i = 0; i < occurrences.size(); i++) {
+                    CompanyComplianceHistoryDTO item = occurrences.get(i);
+                    boolean compMatch = Objects.equals(item.getCompanyId(), histDto.getCompanyId());
+                    boolean tplMatch = Objects.equals(item.getComplianceName(), histDto.getComplianceName());
+                    boolean subMatch = Objects.equals(item.getSubComplianceName(), histDto.getSubComplianceName());
+                    boolean monthMatch = Objects.equals(item.getDueMonth(), histDto.getDueMonth());
+                    boolean yearMatch = Objects.equals(item.getDueYear(), histDto.getDueYear());
+                    if (compMatch && tplMatch && subMatch && monthMatch && yearMatch) {
+                        matchIdx = i;
+                        break;
+                    }
+                }
+
+                if (matchIdx >= 0) {
+                    occurrences.set(matchIdx, histDto);
+                } else {
+                    occurrences.add(histDto);
+                }
+            }
+        }
+
         return occurrences;
+    }
+
+    // ==================== HISTORICAL RECORD MANAGEMENT (SUPER ADMIN ONLY) ====================
+
+    /**
+     * Resolves the statutory due date for a given compliance template/sub-template for a specific year and month.
+     * Takes configuration from company compliance, sub-template config, or template config.
+     */
+    public LocalDate calculateStatutoryDueDate(Long companyId, Long templateId, Long subTemplateId, int year, int month) {
+        ComplianceConfig config = null;
+
+        // 1. Try company-specific sub-template compliance config
+        if (companyId != null && subTemplateId != null && subTemplateId > 0) {
+            Optional<CompanyCompliance> cc = companyComplianceRepository.findByCompanyIdAndSubTemplateId(companyId, subTemplateId);
+            if (cc.isPresent()) {
+                config = cc.get().getConfig();
+                if (config == null && cc.get().getId() != null) {
+                    config = configRepository.findByCompanyComplianceId(cc.get().getId()).orElse(null);
+                }
+            }
+        }
+
+        // 2. Try company-specific parent compliance config
+        if (config == null && companyId != null && templateId != null) {
+            Optional<CompanyCompliance> cc = companyComplianceRepository.findByCompanyIdAndTemplateIdAndIsParentTrue(companyId, templateId);
+            if (cc.isPresent()) {
+                config = cc.get().getConfig();
+                if (config == null && cc.get().getId() != null) {
+                    config = configRepository.findByCompanyComplianceId(cc.get().getId()).orElse(null);
+                }
+            }
+        }
+
+        // 3. Try global sub-template config
+        if (config == null && subTemplateId != null && subTemplateId > 0) {
+            config = configRepository.findBySubTemplateIdAndCompanyComplianceIsNull(subTemplateId).orElse(null);
+            if (config == null) {
+                List<ComplianceConfig> anyConfigs = configRepository.findAllBySubTemplateId(subTemplateId);
+                if (!anyConfigs.isEmpty()) {
+                    config = anyConfigs.get(0);
+                }
+            }
+        }
+
+        // 4. Try global template config
+        if (config == null && templateId != null) {
+            config = configRepository.findByTemplateIdAndCompanyComplianceIsNull(templateId).orElse(null);
+            if (config == null) {
+                List<ComplianceConfig> anyConfigs = configRepository.findAllByTemplateId(templateId);
+                if (!anyConfigs.isEmpty()) {
+                    config = anyConfigs.get(0);
+                }
+            }
+        }
+
+        int maxDays = YearMonth.of(year, month).lengthOfMonth();
+        Integer dueDay = null;
+
+        if (config != null) {
+            if (config.getDueDayOfMonth() != null && config.getDueDayOfMonth() > 0) {
+                dueDay = config.getDueDayOfMonth();
+            } else if (config.getDueDate() != null) {
+                dueDay = config.getDueDate().getDayOfMonth();
+            } else if (config.getCustomDueDate() != null) {
+                dueDay = config.getCustomDueDate().getDayOfMonth();
+            }
+        }
+
+        if (dueDay == null) {
+            String name = "";
+            if (subTemplateId != null && subTemplateId > 0) {
+                Optional<ComplianceSubTemplate> stOpt = subTemplateRepository.findById(subTemplateId);
+                if (stOpt.isPresent()) {
+                    name = stOpt.get().getName();
+                }
+            }
+            if (name.isEmpty() && templateId != null) {
+                Optional<ComplianceTemplate> tOpt = templateRepository.findById(templateId);
+                if (tOpt.isPresent()) {
+                    name = tOpt.get().getName();
+                }
+            }
+            String lower = name.toLowerCase();
+            if (lower.contains("gstr-1") || lower.contains("gstr 1")) {
+                dueDay = 11;
+            } else if (lower.contains("gstr-3b") || lower.contains("gstr 3b") || lower.contains("gst")) {
+                dueDay = 20;
+            } else if (lower.contains("tds") || lower.contains("tcs")) {
+                dueDay = 7;
+            } else if (lower.contains("epf") || lower.contains("pf") || lower.contains("esi")) {
+                dueDay = 15;
+            } else if (lower.contains("advance tax")) {
+                dueDay = 15;
+            } else {
+                dueDay = 20;
+            }
+        }
+
+        return LocalDate.of(year, month, Math.min(dueDay, maxDays));
+    }
+
+    @Transactional
+    public CompanyComplianceHistoryDTO addHistoricalComplianceRecord(
+            HistoricalComplianceRecordRequestDTO dto,
+            MultipartFile documentFile,
+            User admin) {
+
+        if (admin == null || admin.getRole() != UserRole.SUPER_ADMIN) {
+            throw new BusinessException("Access Denied: Only Super Admin can add historical compliance records");
+        }
+
+        if (dto.getCompanyId() == null) {
+            throw new BusinessException("Company is required");
+        }
+        Company company = companyRepository.findById(dto.getCompanyId())
+                .orElseThrow(() -> new ResourceNotFoundException("Company not found with ID: " + dto.getCompanyId()));
+
+        if (dto.getTemplateId() == null) {
+            throw new BusinessException("Compliance Category/Template is required");
+        }
+        ComplianceTemplate template = templateRepository.findById(dto.getTemplateId())
+                .orElseThrow(() -> new ResourceNotFoundException("Compliance template not found with ID: " + dto.getTemplateId()));
+
+        ComplianceSubTemplate subTemplate = null;
+        if (dto.getSubTemplateId() != null && dto.getSubTemplateId() > 0) {
+            subTemplate = subTemplateRepository.findById(dto.getSubTemplateId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Sub-compliance template not found with ID: " + dto.getSubTemplateId()));
+        }
+
+        // 1. Validate that the target month/year is in the past
+        LocalDate today = LocalDate.now(IST_ZONE);
+        YearMonth targetYm = YearMonth.of(dto.getYear(), dto.getMonth());
+        YearMonth currentYm = YearMonth.from(today);
+        if (!targetYm.isBefore(currentYm) && !dto.getDueDate().isBefore(today)) {
+            throw new BusinessException("Only past/previous compliance records (prior to the current month/date) can be added as history. Current and upcoming compliances are handled automatically through active workflows.");
+        }
+
+        // 2. Validate that Company Admin hasn't already completed this compliance in the live system
+        List<CompanyCompliance> liveCCs = companyComplianceRepository.findByCompanyIdAndTemplateIdAndDeletedFalse(dto.getCompanyId(), dto.getTemplateId());
+        for (CompanyCompliance cc : liveCCs) {
+            if (dto.getSubTemplateId() != null && dto.getSubTemplateId() > 0) {
+                if (cc.getSubTemplate() == null || !cc.getSubTemplate().getId().equals(dto.getSubTemplateId())) {
+                    continue;
+                }
+            } else if (cc.getSubTemplate() != null) {
+                continue;
+            }
+            LocalDate due = resolveEffectiveDueDate(cc);
+            if (due != null && due.getYear() == dto.getYear() && due.getMonthValue() == dto.getMonth()) {
+                if (cc.getStatus() == ComplianceStatus.COMPLETED && cc.getCompletedAt() != null) {
+                    String compBy = cc.getCompletedBy() != null ? "Company Admin / User #" + cc.getCompletedBy() : "Company Admin";
+                    throw new BusinessException("This compliance was already completed by " + compBy + " on " + cc.getCompletedAt() +
+                            (cc.getAdminSubmissionReference() != null ? " (Reference: " + cc.getAdminSubmissionReference() + ")" : "") +
+                            ". Super Admin cannot edit or overwrite compliances completed by the Company Admin.");
+                }
+            }
+        }
+
+        // 3. Handle document upload
+        String documentUrl = null;
+        if (documentFile != null && !documentFile.isEmpty()) {
+            try {
+                if (documentStorageService != null) {
+                    String savedFile = documentStorageService.store(documentFile, "hist_compliance");
+                    documentUrl = documentStorageService.getUrl(savedFile);
+                }
+            } catch (Exception e) {
+                log.error("Failed to store historical compliance document: {}", e.getMessage());
+                throw new BusinessException("Failed to upload document: " + e.getMessage());
+            }
+        }
+
+        // 4. Find existing historical record or create new
+        Long subId = subTemplate != null ? subTemplate.getId() : null;
+        CompanyComplianceHistoricalRecord record = null;
+        if (historicalRecordRepository != null) {
+            if (dto.getId() != null && dto.getId() > 0) {
+                record = historicalRecordRepository.findById(dto.getId()).orElse(null);
+            }
+            if (record == null) {
+                record = historicalRecordRepository.findExistingRecord(company.getId(), template.getId(), subId, dto.getYear(), dto.getMonth()).orElse(null);
+            }
+        }
+
+        if (record == null) {
+            record = new CompanyComplianceHistoricalRecord();
+            record.setCompany(company);
+            record.setTemplate(template);
+            record.setSubTemplate(subTemplate);
+            record.setPeriodYear(dto.getYear());
+            record.setPeriodMonth(dto.getMonth());
+            record.setCreatedAt(LocalDateTime.now(IST_ZONE));
+        } else {
+            record.setCompany(company);
+            record.setTemplate(template);
+            record.setSubTemplate(subTemplate);
+            record.setPeriodYear(dto.getYear());
+            record.setPeriodMonth(dto.getMonth());
+        }
+
+        record.setDueDate(dto.getDueDate());
+
+        LocalDateTime completedAt = dto.getCompletedAt();
+        if (completedAt != null) {
+            record.setStatus(ComplianceStatus.COMPLETED);
+            record.setCompletedAt(completedAt);
+            record.setCompletedLate(completedAt.toLocalDate().isAfter(dto.getDueDate()));
+        } else {
+            ComplianceStatus st = dto.getStatus() != null ? dto.getStatus() : ComplianceStatus.OVERDUE;
+            if (st == ComplianceStatus.COMPLETED) {
+                completedAt = dto.getDueDate().atTime(18, 0);
+                record.setStatus(ComplianceStatus.COMPLETED);
+                record.setCompletedAt(completedAt);
+                record.setCompletedLate(false);
+            } else {
+                record.setStatus(st);
+                record.setCompletedAt(null);
+                record.setCompletedLate(false);
+            }
+        }
+
+        if (dto.getSubmissionReference() != null && !dto.getSubmissionReference().trim().isEmpty()) {
+            record.setSubmissionReference(dto.getSubmissionReference().trim());
+        }
+        if (documentUrl != null) {
+            record.setSubmissionDocumentUrl(documentUrl);
+        }
+        if (dto.getRemarks() != null && !dto.getRemarks().trim().isEmpty()) {
+            record.setRemarks(dto.getRemarks().trim());
+        }
+
+        record.setCreatedBy(admin.getId());
+        record.setCreatedByName(admin.getFullName() != null ? admin.getFullName() : "Super Admin");
+        record.setUpdatedAt(LocalDateTime.now(IST_ZONE));
+
+        if (historicalRecordRepository != null) {
+            record = historicalRecordRepository.save(record);
+        }
+
+        log.info("Super Admin {} saved historical compliance record ID: {} for company: {} (Template: {}, Period: {}/{})",
+                admin.getEmail(), record.getId(), company.getName(), template.getName(), dto.getMonth(), dto.getYear());
+
+        String[] monthNames = {
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+        };
+        int m = record.getPeriodMonth();
+
+        int daysOverdue = 0;
+        if (record.getStatus() == ComplianceStatus.OVERDUE && record.getDueDate() != null && record.getDueDate().isBefore(today)) {
+            daysOverdue = (int) ChronoUnit.DAYS.between(record.getDueDate(), today);
+        } else if (record.getStatus() == ComplianceStatus.COMPLETED && record.isCompletedLate() && record.getCompletedAt() != null && record.getDueDate() != null && record.getCompletedAt().toLocalDate().isAfter(record.getDueDate())) {
+            daysOverdue = (int) ChronoUnit.DAYS.between(record.getDueDate(), record.getCompletedAt().toLocalDate());
+        }
+
+        return CompanyComplianceHistoryDTO.builder()
+                .id(record.getId())
+                .historicalRecordId(record.getId())
+                .isHistorical(true)
+                .companyId(company.getId())
+                .companyName(company.getName())
+                .complianceName(template.getName())
+                .subComplianceName(subTemplate != null ? subTemplate.getName() : null)
+                .categoryName(template.getName())
+                .frequency(ComplianceFrequency.MONTHLY)
+                .dueDate(record.getDueDate())
+                .dueMonth(m)
+                .dueYear(record.getPeriodYear())
+                .monthName(m >= 1 && m <= 12 ? monthNames[m - 1] : "Month " + m)
+                .status(record.getStatus())
+                .isOverdue(record.getStatus() == ComplianceStatus.OVERDUE)
+                .completedLate(record.isCompletedLate())
+                .daysOverdue(daysOverdue)
+                .completedAt(record.getCompletedAt())
+                .completedByName(record.getCreatedByName())
+                .adminNotes(record.getRemarks())
+                .submissionReference(record.getSubmissionReference())
+                .submissionDocumentUrl(record.getSubmissionDocumentUrl())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getHistoricalRecordById(Long recordId, User admin) {
+        if (admin == null || admin.getRole() != UserRole.SUPER_ADMIN) {
+            throw new BusinessException("Access Denied: Only Super Admin can view historical compliance records");
+        }
+        if (historicalRecordRepository == null) {
+            throw new BusinessException("Historical records repository not initialized");
+        }
+        CompanyComplianceHistoricalRecord hr = historicalRecordRepository.findById(recordId)
+                .orElseThrow(() -> new ResourceNotFoundException("Historical compliance record not found with ID: " + recordId));
+
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", hr.getId());
+        map.put("companyId", hr.getCompany() != null ? hr.getCompany().getId() : null);
+        map.put("companyName", hr.getCompany() != null ? hr.getCompany().getName() : "");
+        map.put("templateId", hr.getTemplate() != null ? hr.getTemplate().getId() : null);
+        map.put("templateName", hr.getTemplate() != null ? hr.getTemplate().getName() : "");
+        map.put("subTemplateId", hr.getSubTemplate() != null ? hr.getSubTemplate().getId() : null);
+        map.put("subTemplateName", hr.getSubTemplate() != null ? hr.getSubTemplate().getName() : "");
+        map.put("year", hr.getPeriodYear());
+        map.put("month", hr.getPeriodMonth());
+        map.put("dueDate", hr.getDueDate() != null ? hr.getDueDate().toString() : "");
+        map.put("status", hr.getStatus() != null ? hr.getStatus().name() : "OVERDUE");
+        map.put("completedAt", hr.getCompletedAt() != null ? hr.getCompletedAt().toString() : "");
+        map.put("completedLate", hr.isCompletedLate());
+        map.put("submissionReference", hr.getSubmissionReference());
+        map.put("submissionDocumentUrl", hr.getSubmissionDocumentUrl());
+        map.put("remarks", hr.getRemarks());
+        return map;
+    }
+
+    @Transactional
+    public void deleteHistoricalComplianceRecord(Long recordId, User admin) {
+        if (admin == null || admin.getRole() != UserRole.SUPER_ADMIN) {
+            throw new BusinessException("Access Denied: Only Super Admin can delete historical compliance records");
+        }
+        if (historicalRecordRepository == null) {
+            return;
+        }
+        CompanyComplianceHistoricalRecord record = historicalRecordRepository.findById(recordId)
+                .orElseThrow(() -> new ResourceNotFoundException("Historical compliance record not found with ID: " + recordId));
+        historicalRecordRepository.delete(record);
+        log.info("Super Admin {} deleted historical compliance record ID: {}", admin.getEmail(), recordId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ComplianceHistoryDTO> getHistoricalComplianceItemLogs(Long recordId) {
+        if (historicalRecordRepository == null) {
+            return Collections.emptyList();
+        }
+        CompanyComplianceHistoricalRecord hr = historicalRecordRepository.findById(recordId).orElse(null);
+        if (hr == null) {
+            return Collections.emptyList();
+        }
+        return List.of(mapHistoricalRecordToLogDTO(hr));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ComplianceHistoryDTO> getComplianceItemLogsForCompany(Long complianceId, Long companyId, boolean isHistorical) {
+        if (isHistorical) {
+            if (historicalRecordRepository != null) {
+                CompanyComplianceHistoricalRecord hr = historicalRecordRepository.findByIdAndCompanyId(complianceId, companyId).orElse(null);
+                if (hr != null) {
+                    return List.of(mapHistoricalRecordToLogDTO(hr));
+                }
+            }
+            throw new ResourceNotFoundException("Historical compliance record not found for this company");
+        }
+
+        // Check regular company compliances first
+        boolean exists = companyComplianceRepository.existsByIdAndCompanyIdAndDeletedFalse(complianceId, companyId);
+        if (exists) {
+            return getComplianceItemLogs(complianceId);
+        }
+
+        // Fallback: Check if it's a historical record for this company
+        if (historicalRecordRepository != null) {
+            CompanyComplianceHistoricalRecord hr = historicalRecordRepository.findByIdAndCompanyId(complianceId, companyId).orElse(null);
+            if (hr != null) {
+                return List.of(mapHistoricalRecordToLogDTO(hr));
+            }
+        }
+
+        throw new ResourceNotFoundException("Compliance not found for this company");
+    }
+
+    private ComplianceHistoryDTO mapHistoricalRecordToLogDTO(CompanyComplianceHistoricalRecord hr) {
+        ComplianceHistoryDTO histLog = new ComplianceHistoryDTO();
+        histLog.setId(hr.getId());
+        histLog.setAction("Historical Compliance Record Added");
+        histLog.setPreviousStatus(null);
+        histLog.setNewStatus(hr.getStatus() != null ? hr.getStatus().name() : "COMPLETED");
+        histLog.setPerformedAt(hr.getCreatedAt() != null ? hr.getCreatedAt() : LocalDateTime.now(IST_ZONE));
+        histLog.setPerformedByName(hr.getCreatedByName() != null ? hr.getCreatedByName() : "Super Admin");
+        String rem = (hr.getRemarks() != null && !hr.getRemarks().isEmpty()) ? hr.getRemarks() : "Historical compliance record";
+        if (hr.getSubmissionReference() != null && !hr.getSubmissionReference().isEmpty()) {
+            rem += " (Ref: " + hr.getSubmissionReference() + ")";
+        }
+        histLog.setRemarks(rem);
+        histLog.setCompanyName(hr.getCompany() != null ? hr.getCompany().getName() : "");
+        return histLog;
     }
 
     @Transactional(readOnly = true)
     public List<ComplianceHistoryDTO> getComplianceItemLogs(Long complianceId) {
         List<ComplianceHistory> list = historyRepository.findByCompanyComplianceIdOrderByPerformedAtDesc(complianceId);
         if (list.isEmpty()) {
+            if (historicalRecordRepository != null) {
+                CompanyComplianceHistoricalRecord hr = historicalRecordRepository.findById(complianceId).orElse(null);
+                if (hr != null) {
+                    return List.of(mapHistoricalRecordToLogDTO(hr));
+                }
+            }
+
             CompanyCompliance cc = companyComplianceRepository.findById(complianceId).orElse(null);
             if (cc != null && cc.getCreatedAt() != null) {
                 ComplianceHistoryDTO baseline = new ComplianceHistoryDTO();

@@ -7,6 +7,7 @@ import com.vnext.exception.ResourceNotFoundException;
 import com.vnext.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -45,6 +46,9 @@ public class CompanyService {
     private final ComplianceTemplateRepository complianceTemplateRepository;
     private final NotificationEventService notificationEventService;
     private final DeviceTokenRepository deviceTokenRepository;
+
+    @Autowired(required = false)
+    private CompanyComplianceHistoricalRecordRepository historicalRecordRepository;
 
     // ==================== COMPANY CRUD ====================
 
@@ -527,6 +531,15 @@ public class CompanyService {
 
         // ── STEP 10: Delete CompanyDocuments (FK → companies) ────────────────────
         documentRepository.deleteByCompanyId(companyId);
+
+        // ── STEP 10b: Delete Historical Compliance Records (FK → companies) ───────
+        if (historicalRecordRepository != null) {
+            try {
+                historicalRecordRepository.deleteByCompanyId(companyId);
+            } catch (Exception e) {
+                log.warn("Error deleting historical records for company ID={}: {}", companyId, e.getMessage());
+            }
+        }
 
         // ── STEP 11: Delete DeviceTokens BEFORE Users (FK → users) ───────────────
         for (User u : allCompanyUsers) {
